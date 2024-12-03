@@ -745,7 +745,9 @@ class NamedArrayAggregations:
         <xarray.NamedArray (x: 6)> Size: 48B
         array([ 1.,  3.,  6.,  6.,  8., nan])
         """
-        pass
+        return self.__array_wrap__(
+            cumsum(self.data, axis=dim, skipna=skipna, **kwargs)
+        )
 
     def cumprod(self, dim: Dims=None, *, skipna: bool | None=None, **kwargs: Any) -> Self:
         """
@@ -806,4 +808,6 @@ class NamedArrayAggregations:
         <xarray.NamedArray (x: 6)> Size: 48B
         array([ 1.,  2.,  6.,  0.,  0., nan])
         """
-        pass
+        return self.__array_wrap__(
+            cumprod(self.data, axis=dim, skipna=skipna, **kwargs)
+        )
