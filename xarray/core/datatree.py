@@ -51,7 +51,15 @@ class DatasetView(Dataset):
     @classmethod
     def _constructor(cls, variables: dict[Any, Variable], coord_names: set[Hashable], dims: dict[Any, int], attrs: dict | None, indexes: dict[Any, Index], encoding: dict | None, close: Callable[[], None] | None) -> DatasetView:
         """Private constructor, from Dataset attributes."""
-        pass
+        obj = object.__new__(cls)
+        obj._variables = variables
+        obj._coord_names = coord_names
+        obj._dims = dims
+        obj._attrs = attrs
+        obj._indexes = indexes
+        obj._encoding = encoding
+        obj._close = close
+        return obj
 
     def __setitem__(self, key, val) -> None:
         raise AttributeError('Mutation of the DatasetView is not allowed, please use `.__setitem__` on the wrapping DataTree node, or use `dt.to_dataset()` if you want a mutable dataset. If calling this from within `map_over_subtree`,use `.copy()` first to get a mutable version of the input dataset.')
@@ -77,14 +85,14 @@ class DatasetView(Dataset):
         Overriding this method (along with ._replace) and modifying it to return a Dataset object
         should hopefully ensure that the return type of any method on this object is a Dataset.
         """
-        pass
+        return Dataset._construct_direct(variables, coord_names, dims, attrs, indexes, encoding, close)
 
     def _replace(self, variables: dict[Hashable, Variable] | None=None, coord_names: set[Hashable] | None=None, dims: dict[Any, int] | None=None, attrs: dict[Hashable, Any] | None | Default=_default, indexes: dict[Hashable, Index] | None=None, encoding: dict | None | Default=_default, inplace: bool=False) -> Dataset:
         """
         Overriding this method (along with ._construct_direct) and modifying it to return a Dataset object
         should hopefully ensure that the return type of any method on this object is a Dataset.
         """
-        pass
+        return Dataset._replace(self, variables, coord_names, dims, attrs, indexes, encoding, inplace)
 
     def map(self, func: Callable, keep_attrs: bool | None=None, args: Iterable[Any]=(), **kwargs: Any) -> Dataset:
         """Apply a function to each data variable in this dataset
@@ -128,7 +136,18 @@ class DatasetView(Dataset):
             foo      (dim_0, dim_1) float64 48B 1.764 0.4002 0.9787 2.241 1.868 0.9773
             bar      (x) float64 16B 1.0 2.0
         """
-        pass
+        variables = {k: func(v, *args, **kwargs) for k, v in self.data_vars.items()}
+        if keep_attrs is None:
+            keep_attrs = XR_OPTS["keep_attrs"]
+        return type(self)._construct_direct(
+            variables,
+            self._coord_names,
+            self._dims,
+            self._attrs if keep_attrs else None,
+            self._indexes,
+            self._encoding,
+            self._close,
+        )
 
 class DataTree(NamedNode, MappedDatasetMethodsMixin, MappedDataWithCoords, DataTreeArithmeticMixin, TreeAttrAccessMixin, Generic[Tree], Mapping):
     """
@@ -187,7 +206,7 @@ class DataTree(NamedNode, MappedDatasetMethodsMixin, MappedDataWithCoords, DataT
     @property
     def parent(self: DataTree) -> DataTree | None:
         """Parent of this node."""
-        pass
+        return self._parent
 
     @property
     def ds(self) -> DatasetView:
@@ -203,7 +222,15 @@ class DataTree(NamedNode, MappedDatasetMethodsMixin, MappedDataWithCoords, DataT
         --------
         DataTree.to_dataset
         """
-        pass
+        return DatasetView._constructor(
+            self._data_variables,
+            set(self._node_coord_variables),
+            self._node_dims,
+            self._attrs,
+            self._node_indexes,
+            self._encoding,
+            self._close
+        )
 
     def to_dataset(self, inherited: bool=True) -> Dataset:
         """
@@ -219,7 +246,19 @@ class DataTree(NamedNode, MappedDatasetMethodsMixin, MappedDataWithCoords, DataT
         --------
         DataTree.ds
         """
-        pass
+        if inherited:
+            coords = self.coords
+            indexes = self.indexes
+        else:
+            coords = {k: v for k, v in self._node_coord_variables.items()}
+            indexes = self._node_indexes
+
+        return Dataset(
+            data_vars=self._data_variables,
+            coords=coords,
+            attrs=self._attrs,
+            indexes=indexes
+        )
 
     @property
     def has_data(self) -> bool:
