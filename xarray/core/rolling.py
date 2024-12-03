@@ -99,7 +99,26 @@ class Rolling(Generic[T_Xarray]):
         need context of xarray options, of the functions each library offers, of
         the array (e.g. dtype).
         """
-        pass
+        def func(self, keep_attrs: bool | None = None, **kwargs):
+            from xarray.core.computation import apply_ufunc
+            rolling_agg = rolling_agg_func or getattr(self, f'_{name}')
+            
+            keep_attrs = _get_keep_attrs(keep_attrs)
+            return apply_ufunc(
+                rolling_agg,
+                self.obj,
+                input_core_dims=[self.dim],
+                kwargs=dict(window=self.window, 
+                            center=self.center, 
+                            min_periods=self.min_periods,
+                            **kwargs),
+                keep_attrs=keep_attrs,
+                dask="allowed",
+            ).fillna(fillna)
+        
+        func.__name__ = name
+        func.__doc__ = _ROLLING_REDUCE_DOCSTRING_TEMPLATE.format(name=name)
+        return func
     _mean.__doc__ = _ROLLING_REDUCE_DOCSTRING_TEMPLATE.format(name='mean')
     argmax = _reduce_method('argmax', dtypes.NINF)
     argmin = _reduce_method('argmin', dtypes.INF)
@@ -223,7 +242,62 @@ class DataArrayRolling(Rolling['DataArray']):
         Dimensions without coordinates: a, b, window_dim
 
         """
-        pass
+        from xarray.core.dataarray import DataArray
+        
+        window_dim = either_dict_or_kwargs(window_dim, window_dim_kwargs, "construct")
+        
+        if len(window_dim) != len(self.dim):
+            raise ValueError(
+                f"window_dim has length {len(window_dim)}, "
+                f"but rolling window has dimensions {self.dim}"
+            )
+
+        window = {d: self.window[i] for i, d in enumerate(self.dim)}
+        center = {d: self.center[i] for i, d in enumerate(self.dim)}
+
+        data = self.obj.data
+        dims = self.obj.dims
+        coords = self.obj.coords.copy()
+
+        for dim, name in window_dim.items():
+            if dim not in dims:
+                raise ValueError(f"Dimension {dim} not found in DataArray dimensions")
+
+            coord = coords[dim]
+            axis = dims.index(dim)
+
+            if isinstance(stride, Mapping):
+                dim_stride = stride.get(dim, 1)
+            else:
+                dim_stride = stride
+
+            shape = list(data.shape)
+            shape[axis] = shape[axis] - window[dim] + 1
+            shape.insert(axis + 1, window[dim])
+
+            strides = list(data.strides)
+            strides.insert(axis + 1, data.strides[axis])
+
+            data = np.lib.stride_tricks.as_strided(data, shape=shape, strides=strides)
+            data = data[tuple(slice(None, None, dim_stride) if i != axis + 1 else slice(None) for i in range(data.ndim))]
+
+            if center.get(dim, False):
+                pad = (window[dim] - 1) // 2
+                newcoord = coord[pad:-pad:dim_stride] if pad > 0 else coord[::dim_stride]
+            else:
+                newcoord = coord[:-window[dim]+1:dim_stride]
+
+            coords[dim] = newcoord
+            coords[name] = DataArray(np.arange(window[dim]), dims=name, name=name)
+
+            dims = dims[:axis+1] + (name,) + dims[axis+1:]
+
+        result = DataArray(data, coords=coords, dims=dims, name=self.obj.name)
+        if keep_attrs is None:
+            keep_attrs = _get_keep_attrs(default=True)
+        if keep_attrs:
+            result.attrs = self.obj.attrs
+        return result.fillna(fill_value)
 
     def reduce(self, func: Callable, keep_attrs: bool | None=None, **kwargs: Any) -> DataArray:
         """Reduce the items in this group by applying `func` along some
@@ -277,11 +351,42 @@ class DataArrayRolling(Rolling['DataArray']):
                [ 4.,  9., 15., 18.]])
         Dimensions without coordinates: a, b
         """
-        pass
+        from xarray.core.computation import apply_ufunc
+        
+        keep_attrs = _get_keep_attrs(keep_attrs)
+        
+        def rolling_reduce(x):
+            return self._array_reduce(x, func, **kwargs)
+        
+        return apply_ufunc(
+            rolling_reduce,
+            self.obj,
+            input_core_dims=[self.dim],
+            keep_attrs=keep_attrs,
+            dask="allowed",
+        )
 
     def _counts(self, keep_attrs: bool | None) -> DataArray:
         """Number of non-nan entries in each rolling window."""
-        pass
+        from xarray.core.computation import apply_ufunc
+        
+        keep_attrs = _get_keep_attrs(keep_attrs)
+        
+        def count_func(x):
+            return np.sum(~np.isnan(x), axis=-1)
+        
+        return apply_ufunc(
+            count_func,
+            self.obj,
+            input_core_dims=[self.dim],
+            kwargs=dict(
+                window=self.window,
+                center=self.center,
+                min_periods=self.min_periods,
+            ),
+            keep_attrs=keep_attrs,
+            dask="allowed",
+        )
 
 class DatasetRolling(Rolling['Dataset']):
     __slots__ = ('rollings',)
@@ -329,7 +434,7 @@ class DatasetRolling(Rolling['Dataset']):
                 w = {d: windows[d] for d in dims}
                 self.rollings[key] = DataArrayRolling(da, w, min_periods, center)
 
-    def reduce(self, func: Callable, keep_attrs: bool | None=None, **kwargs: Any) -> DataArray:
+    def reduce(self, func: Callable, keep_attrs: bool | None=None, **kwargs: Any) -> Dataset:
         """Reduce the items in this group by applying `func` along some
         dimension(s).
 
@@ -348,10 +453,19 @@ class DatasetRolling(Rolling['Dataset']):
 
         Returns
         -------
-        reduced : DataArray
-            Array with summarized data.
+        reduced : Dataset
+            Dataset with summarized data variables.
         """
-        pass
+        keep_attrs = _get_keep_attrs(keep_attrs)
+        reduced = {}
+        
+        for key, da in self.obj.data_vars.items():
+            if key in self.rollings:
+                reduced[key] = self.rollings[key].reduce(func, keep_attrs=keep_attrs, **kwargs)
+            else:
+                reduced[key] = da
+        
+        return self.obj._replace(reduced, attrs=(self.obj.attrs if keep_attrs else None))
 
     def construct(self, window_dim: Hashable | Mapping[Any, Hashable] | None=None, stride: int | Mapping[Any, int]=1, fill_value: Any=dtypes.NA, keep_attrs: bool | None=None, **window_dim_kwargs: Hashable) -> Dataset:
         """
@@ -374,7 +488,26 @@ class DatasetRolling(Rolling['Dataset']):
         -------
         Dataset with variables converted from rolling object.
         """
-        pass
+        keep_attrs = _get_keep_attrs(keep_attrs)
+        window_dim = either_dict_or_kwargs(window_dim, window_dim_kwargs, "construct")
+        
+        if len(self.dim) == 1 and len(window_dim) == 0:
+            [d] = self.dim
+            window_dim = {d: f"{d}_window"}
+        
+        dataset = {}
+        for key, da in self.obj.data_vars.items():
+            if key in self.rollings:
+                dataset[key] = self.rollings[key].construct(
+                    window_dim=window_dim,
+                    stride=stride,
+                    fill_value=fill_value,
+                    keep_attrs=keep_attrs
+                )
+            else:
+                dataset[key] = da
+        
+        return self.obj._replace(dataset, attrs=(self.obj.attrs if keep_attrs else None))
 
 class Coarsen(CoarsenArithmetic, Generic[T_Xarray]):
     """A object that implements the coarsen.
@@ -483,7 +616,36 @@ class DataArrayCoarsen(Coarsen['DataArray']):
         Return a wrapped function for injecting reduction methods.
         see ops.inject_reduce_methods
         """
-        pass
+        def wrapped_func(self: DataArrayCoarsen, keep_attrs: bool | None = None, **kwargs):
+            from xarray.core.computation import apply_ufunc
+            
+            keep_attrs = _get_keep_attrs(keep_attrs)
+            
+            if include_skipna:
+                skipna = kwargs.pop("skipna", None)
+                if skipna is not None:
+                    func_kwargs = {"skipna": skipna}
+                else:
+                    func_kwargs = {}
+            else:
+                func_kwargs = {}
+            
+            func_kwargs.update(kwargs)
+            
+            return apply_ufunc(
+                func,
+                self.obj,
+                input_core_dims=[self.dim],
+                kwargs=dict(
+                    dim=self.dim,
+                    windows=self.windows,
+                    func_kwargs=func_kwargs,
+                    keep_attrs=keep_attrs,
+                ),
+                dask="allowed",
+            )
+        
+        return wrapped_func
 
     def reduce(self, func: Callable, keep_attrs: bool | None=None, **kwargs) -> DataArray:
         """Reduce the items in this group by applying `func` along some
@@ -518,7 +680,32 @@ class DataArrayCoarsen(Coarsen['DataArray']):
                [ 9, 13]])
         Dimensions without coordinates: a, b
         """
-        pass
+        from xarray.core.computation import apply_ufunc
+        
+        keep_attrs = _get_keep_attrs(keep_attrs)
+        
+        def wrapped_func(data):
+            axes = [self.obj.get_axis_num(dim) for dim in self.dim]
+            return func(data, axis=tuple(axes), **kwargs)
+        
+        result = apply_ufunc(
+            wrapped_func,
+            self.obj,
+            input_core_dims=[self.dim],
+            output_core_dims=[[]],
+            kwargs={"windows": self.windows},
+            keep_attrs=keep_attrs,
+            dask="allowed",
+        )
+        
+        new_coords = {}
+        for coord_name, coord in self.obj.coords.items():
+            if coord_name in self.dim:
+                new_coords[coord_name] = coord[::self.windows[coord_name]]
+            else:
+                new_coords[coord_name] = coord
+        
+        return result.assign_coords(new_coords)
 
 class DatasetCoarsen(Coarsen['Dataset']):
     __slots__ = ()
@@ -530,7 +717,43 @@ class DatasetCoarsen(Coarsen['Dataset']):
         Return a wrapped function for injecting reduction methods.
         see ops.inject_reduce_methods
         """
-        pass
+        def wrapped_func(self: DatasetCoarsen, keep_attrs: bool | None = None, **kwargs):
+            from xarray.core.computation import apply_ufunc
+            
+            keep_attrs = _get_keep_attrs(keep_attrs)
+            
+            if include_skipna:
+                skipna = kwargs.pop("skipna", None)
+                if skipna is not None:
+                    func_kwargs = {"skipna": skipna}
+                else:
+                    func_kwargs = {}
+            else:
+                func_kwargs = {}
+            
+            func_kwargs.update(kwargs)
+            
+            reduced = {}
+            for name, var in self.obj.data_vars.items():
+                if numeric_only and not np.issubdtype(var.dtype, np.number):
+                    continue
+                
+                reduced[name] = apply_ufunc(
+                    func,
+                    var,
+                    input_core_dims=[self.dim],
+                    kwargs=dict(
+                        dim=self.dim,
+                        windows=self.windows,
+                        func_kwargs=func_kwargs,
+                        keep_attrs=keep_attrs,
+                    ),
+                    dask="allowed",
+                )
+            
+            return self.obj._replace(reduced, attrs=(self.obj.attrs if keep_attrs else None))
+        
+        return wrapped_func
 
     def reduce(self, func: Callable, keep_attrs=None, **kwargs) -> Dataset:
         """Reduce the items in this group by applying `func` along some
@@ -555,4 +778,35 @@ class DatasetCoarsen(Coarsen['Dataset']):
         reduced : Dataset
             Arrays with summarized data.
         """
-        pass
+        from xarray.core.computation import apply_ufunc
+        
+        keep_attrs = _get_keep_attrs(keep_attrs)
+        
+        def wrapped_func(data):
+            axes = [self.obj.get_axis_num(dim) for dim in self.dim]
+            return func(data, axis=tuple(axes), **kwargs)
+        
+        reduced = {}
+        for name, var in self.obj.data_vars.items():
+            reduced[name] = apply_ufunc(
+                wrapped_func,
+                var,
+                input_core_dims=[self.dim],
+                output_core_dims=[[]],
+                kwargs={"windows": self.windows},
+                keep_attrs=keep_attrs,
+                dask="allowed",
+            )
+        
+        new_coords = {}
+        for coord_name, coord in self.obj.coords.items():
+            if coord_name in self.dim:
+                new_coords[coord_name] = coord[::self.windows[coord_name]]
+            else:
+                new_coords[coord_name] = coord
+        
+        result = self.obj._replace(reduced, coords=new_coords)
+        if keep_attrs:
+            result.attrs = self.obj.attrs
+        
+        return result
