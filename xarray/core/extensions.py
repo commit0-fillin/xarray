@@ -21,16 +21,13 @@ class _CachedAccessor:
             cache = obj._cache
         except AttributeError:
             cache = obj._cache = {}
-        try:
-            return cache[self._name]
-        except KeyError:
-            pass
-        try:
-            accessor_obj = self._accessor(obj)
-        except AttributeError:
-            raise RuntimeError(f'error initializing {self._name!r} accessor.')
-        cache[self._name] = accessor_obj
-        return accessor_obj
+        if self._name not in cache:
+            try:
+                accessor_obj = self._accessor(obj)
+            except AttributeError:
+                raise RuntimeError(f'error initializing {self._name!r} accessor.')
+            cache[self._name] = accessor_obj
+        return cache[self._name]
 
 def register_dataarray_accessor(name):
     """Register a custom accessor on xarray.DataArray objects.
@@ -45,7 +42,16 @@ def register_dataarray_accessor(name):
     --------
     register_dataset_accessor
     """
-    pass
+    def decorator(accessor):
+        if hasattr(DataArray, name):
+            warnings.warn(
+                f"registration of accessor {name!r} under name {name!r} for type {DataArray.__name__!r} is overriding a preexisting attribute with the same name.",
+                AccessorRegistrationWarning,
+                stacklevel=2,
+            )
+        setattr(DataArray, name, _CachedAccessor(name, accessor))
+        return accessor
+    return decorator
 
 def register_dataset_accessor(name):
     """Register a custom property on xarray.Dataset objects.
@@ -90,7 +96,16 @@ def register_dataset_accessor(name):
     --------
     register_dataarray_accessor
     """
-    pass
+    def decorator(accessor):
+        if hasattr(Dataset, name):
+            warnings.warn(
+                f"registration of accessor {name!r} under name {name!r} for type {Dataset.__name__!r} is overriding a preexisting attribute with the same name.",
+                AccessorRegistrationWarning,
+                stacklevel=2,
+            )
+        setattr(Dataset, name, _CachedAccessor(name, accessor))
+        return accessor
+    return decorator
 
 def register_datatree_accessor(name):
     """Register a custom accessor on DataTree objects.
@@ -106,4 +121,13 @@ def register_datatree_accessor(name):
     xarray.register_dataarray_accessor
     xarray.register_dataset_accessor
     """
-    pass
+    def decorator(accessor):
+        if hasattr(DataTree, name):
+            warnings.warn(
+                f"registration of accessor {name!r} under name {name!r} for type {DataTree.__name__!r} is overriding a preexisting attribute with the same name.",
+                AccessorRegistrationWarning,
+                stacklevel=2,
+            )
+        setattr(DataTree, name, _CachedAccessor(name, accessor))
+        return accessor
+    return decorator
