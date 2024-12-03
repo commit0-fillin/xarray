@@ -57,8 +57,8 @@ _cached_duck_array_modules: dict[ModType, DuckArrayModule] = {}
 
 def array_type(mod: ModType) -> DuckArrayTypes:
     """Quick wrapper to get the array class of the module."""
-    pass
+    return _cached_duck_array_modules[mod].type
 
 def mod_version(mod: ModType) -> Version:
     """Quick wrapper to get the version of the module."""
-    pass
+    return _cached_duck_array_modules[mod].version
