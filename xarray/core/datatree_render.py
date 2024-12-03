@@ -189,4 +189,7 @@ class RenderDataTree:
             └── sub1C
                 └── sub1Ca
         """
-        pass
+        lines = []
+        for pre, _, node in self:
+            lines.append(f"{pre}{getattr(node, attrname)}")
+        return "\n".join(lines)
