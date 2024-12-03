@@ -38,27 +38,101 @@ def _parsed_string_to_bounds(date_type, resolution, parsed):
     for use with non-standard calendars and cftime.datetime
     objects.
     """
-    pass
+    if resolution == 'year':
+        return (
+            date_type(*parsed[:1], 1, 1),
+            date_type(*parsed[:1], 12, 31, 23, 59, 59, 999999)
+        )
+    elif resolution == 'month':
+        year, month = parsed[:2]
+        last_day = date_type(year, month, 1).days_in_month
+        return (
+            date_type(year, month, 1),
+            date_type(year, month, last_day, 23, 59, 59, 999999)
+        )
+    elif resolution == 'day':
+        return (
+            date_type(*parsed[:3]),
+            date_type(*parsed[:3], 23, 59, 59, 999999)
+        )
+    elif resolution == 'hour':
+        return (
+            date_type(*parsed[:4]),
+            date_type(*parsed[:4], 59, 59, 999999)
+        )
+    elif resolution == 'minute':
+        return (
+            date_type(*parsed[:5]),
+            date_type(*parsed[:5], 59, 999999)
+        )
+    elif resolution == 'second':
+        return (
+            date_type(*parsed[:6]),
+            date_type(*parsed[:6], 999999)
+        )
+    else:
+        return (date_type(*parsed), date_type(*parsed))
 
 def get_date_field(datetimes, field):
     """Adapted from pandas.tslib.get_date_field"""
-    pass
+    if field == 'dayofyear':
+        return np.array([getattr(dt, 'dayofyr') for dt in datetimes])
+    elif field == 'dayofweek':
+        return np.array([getattr(dt, 'dayofwk') for dt in datetimes])
+    elif field == 'days_in_month':
+        return np.array([getattr(dt, 'daysinmonth') for dt in datetimes])
+    else:
+        return np.array([getattr(dt, field) for dt in datetimes])
 
 def _field_accessor(name, docstring=None, min_cftime_version='0.0'):
     """Adapted from pandas.tseries.index._field_accessor"""
-    pass
+    def accessor(self):
+        if cftime is None:
+            raise ImportError("cftime is required for accessing calendar fields")
+        if Version(cftime.__version__) < Version(min_cftime_version):
+            raise AttributeError(f"{name} requires cftime version {min_cftime_version} or later")
+        return get_date_field(self._data, name)
+
+    accessor.__name__ = name
+    accessor.__doc__ = docstring
+    return property(accessor)
 
 def format_row(times, indent=0, separator=', ', row_end=',\n'):
     """Format a single row from format_times."""
-    pass
+    formatted = separator.join(str(t) for t in times)
+    return f"{' ' * indent}{formatted}{row_end}"
 
 def format_times(index, max_width, offset, separator=', ', first_row_offset=0, intermediate_row_end=',\n', last_row_end=''):
     """Format values of cftimeindex as pd.Index."""
-    pass
+    result = []
+    current_row = []
+    current_width = first_row_offset
+
+    for t in index:
+        if current_width + len(str(t)) + len(separator) > max_width:
+            result.append(format_row(current_row, offset, separator, intermediate_row_end))
+            current_row = []
+            current_width = offset
+
+        current_row.append(t)
+        current_width += len(str(t)) + len(separator)
+
+    if current_row:
+        result.append(format_row(current_row, offset, separator, last_row_end))
+
+    return ''.join(result)
 
 def format_attrs(index, separator=', '):
     """Format attributes of CFTimeIndex for __repr__."""
-    pass
+    attrs = []
+    if index.name is not None:
+        attrs.append(f"name='{index.name}'")
+    attrs.append(f"dtype='{index.dtype}'")
+    attrs.append(f"length={len(index)}")
+    attrs.append(f"calendar='{index.calendar}'")
+    if index.freq is not None:
+        attrs.append(f"freq='{index.freq}'")
+    return separator.join(attrs)
 
 class CFTimeIndex(pd.Index):
     """Custom Index for working with CF calendars and dates
