@@ -1317,7 +1317,38 @@ def concat(variables, dim='concat_dim', positions=None, shortcut=False, combine_
         Concatenated Variable formed by stacking all the supplied variables
         along the given dimension.
     """
-    pass
+    if not variables:
+        raise ValueError("No variables were supplied to concat")
+
+    first_var = variables[0]
+    new_dim = dim not in first_var.dims
+
+    if new_dim:
+        concat_dim = dim
+        dim_axis = 0
+    else:
+        concat_dim = first_var.dims.index(dim)
+        dim_axis = first_var.get_axis_num(dim)
+
+    variables = [var.expand_dims({dim: 1}) if new_dim and dim not in var.dims else var for var in variables]
+
+    if not shortcut:
+        variables = align_variables(*variables)
+
+    data = duck_array_ops.concatenate([var.data for var in variables], axis=dim_axis)
+
+    if positions is not None:
+        indices = nputils.inverse_permutation(np.concatenate(positions))
+        data = duck_array_ops.take(data, indices, axis=dim_axis)
+
+    if new_dim:
+        dims = (dim,) + first_var.dims
+    else:
+        dims = first_var.dims
+
+    attrs = merge_attrs([var.attrs for var in variables], combine_attrs)
+
+    return Variable(dims, data, attrs)
 
 def calculate_dimensions(variables: Mapping[Any, Variable]) -> dict[Hashable, int]:
     """Calculate the dimensions corresponding to a set of variables.
