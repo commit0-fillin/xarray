@@ -77,7 +77,17 @@ def _get_lock_maker(scheduler=None):
     --------
     dask.utils.get_scheduler_lock
     """
-    pass
+    if scheduler is None:
+        return threading.Lock
+    elif scheduler == "sync":
+        return threading.Lock
+    elif scheduler == "threads":
+        return threading.Lock
+    elif scheduler in ("processes", "multiprocessing"):
+        return multiprocessing.Lock
+    else:
+        from dask.utils import get_scheduler_lock
+        return get_scheduler_lock(scheduler)
 
 def _get_scheduler(get=None, collection=None) -> str | None:
     """Determine the dask scheduler that is being used.
@@ -88,7 +98,11 @@ def _get_scheduler(get=None, collection=None) -> str | None:
     --------
     dask.base.get_scheduler
     """
-    pass
+    try:
+        from dask.base import get_scheduler
+        return get_scheduler(get, collection)
+    except ImportError:
+        return None
 
 def get_write_lock(key):
     """Get a scheduler appropriate lock for writing to the given resource.
@@ -102,7 +116,11 @@ def get_write_lock(key):
     -------
     Lock object that can be used like a threading.Lock object.
     """
-    pass
+    if key not in _FILE_LOCKS:
+        scheduler = _get_scheduler()
+        lock_maker = _get_lock_maker(scheduler)
+        _FILE_LOCKS[key] = lock_maker()
+    return _FILE_LOCKS[key]
 
 def acquire(lock, blocking=True):
     """Acquire a lock, possibly in a non-blocking fashion.
@@ -110,7 +128,18 @@ def acquire(lock, blocking=True):
     Includes backwards compatibility hacks for old versions of Python, dask
     and dask-distributed.
     """
-    pass
+    try:
+        return lock.acquire(blocking=blocking)
+    except TypeError:
+        # Some lock objects (e.g., multiprocessing.Lock) don't support
+        # the blocking keyword argument.
+        if blocking:
+            return lock.acquire()
+        else:
+            if not lock.acquire(False):
+                return False
+            lock.release()
+            return True
 
 class CombinedLock:
     """A combination of multiple locks.
@@ -144,8 +173,21 @@ class DummyLock:
 
 def combine_locks(locks):
     """Combine a sequence of locks into a single lock."""
-    pass
+    locks = [ensure_lock(lock) for lock in locks]
+    if len(locks) == 0:
+        return DummyLock()
+    elif len(locks) == 1:
+        return locks[0]
+    else:
+        return CombinedLock(locks)
 
 def ensure_lock(lock):
     """Ensure that the given object is a lock."""
-    pass
+    if lock is None:
+        return DummyLock()
+    elif isinstance(lock, (threading.Lock, multiprocessing.Lock, CombinedLock, DummyLock)):
+        return lock
+    elif hasattr(lock, '__enter__') and hasattr(lock, '__exit__'):
+        return lock
+    else:
+        raise TypeError(f"Object {lock} is not a valid lock")
