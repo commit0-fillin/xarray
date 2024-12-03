@@ -35,7 +35,16 @@ def broadcast_dimension_size(variables: list[Variable]) -> dict[Hashable, int]:
 
     Raises ValueError if any dimensions have different sizes.
     """
-    pass
+    dims = {}
+    for var in variables:
+        for dim, size in var.sizes.items():
+            if dim in dims:
+                if dims[dim] != size:
+                    raise ValueError(f"Inconsistent dimension size for {dim}: "
+                                     f"found both {dims[dim]} and {size}")
+            else:
+                dims[dim] = size
+    return dims
 
 class MergeError(ValueError):
     """Error class for merge failures due to incompatible arguments."""
@@ -63,14 +72,44 @@ def unique_variable(name: Hashable, variables: list[Variable], compat: CompatOpt
     ------
     MergeError: if any of the variables are not equal.
     """
-    pass
+    if len(variables) == 1:
+        return variables[0]
+
+    if compat == 'override':
+        return variables[0]
+
+    first_var = variables[0]
+    for var in variables[1:]:
+        if compat == 'broadcast_equals':
+            if not first_var.broadcast_equals(var):
+                raise MergeError(f"Conflicting values for variable {name}")
+        elif compat == 'equals':
+            if not first_var.equals(var):
+                raise MergeError(f"Conflicting values for variable {name}")
+        elif compat == 'identical':
+            if not first_var.identical(var):
+                raise MergeError(f"Conflicting values or attributes for variable {name}")
+        elif compat == 'no_conflicts':
+            if not first_var.no_conflicts(var):
+                raise MergeError(f"Conflicting non-null values for variable {name}")
+        else:
+            raise ValueError(f"Unsupported compat option: {compat}")
+
+    return first_var
 MergeElement = tuple[Variable, Optional[Index]]
 
 def _assert_prioritized_valid(grouped: dict[Hashable, list[MergeElement]], prioritized: Mapping[Any, MergeElement]) -> None:
     """Make sure that elements given in prioritized will not corrupt any
     index given in grouped.
     """
-    pass
+    for name, (variable, index) in prioritized.items():
+        if name in grouped:
+            grouped_variable, grouped_index = grouped[name][0]
+            if index is not None and grouped_index is not None:
+                if not indexes_equal(index, grouped_index):
+                    raise MergeError(f"Incompatible indexes for variable {name}")
+            elif index is not None or grouped_index is not None:
+                raise MergeError(f"Inconsistent presence of index for variable {name}")
 
 def merge_collected(grouped: dict[Any, list[MergeElement]], prioritized: Mapping[Any, MergeElement] | None=None, compat: CompatOptions='minimal', combine_attrs: CombineAttrsOptions='override', equals: dict[Any, bool] | None=None) -> tuple[dict[Hashable, Variable], dict[Hashable, Index]]:
     """Merge dicts of variables, while resolving conflicts appropriately.
@@ -105,7 +144,60 @@ def merge_collected(grouped: dict[Any, list[MergeElement]], prioritized: Mapping
     and Variable values corresponding to those that should be found on the
     merged result.
     """
-    pass
+    if prioritized is None:
+        prioritized = {}
+    
+    _assert_prioritized_valid(grouped, prioritized)
+    
+    result_vars = {}
+    result_indexes = {}
+    
+    for name, elements in grouped.items():
+        if name in prioritized:
+            result_vars[name], result_indexes[name] = prioritized[name]
+        else:
+            variables = [elem[0] for elem in elements]
+            variable = unique_variable(name, variables, compat)
+            
+            indexes = [elem[1] for elem in elements if elem[1] is not None]
+            index = indexes[0] if indexes else None
+            
+            result_vars[name] = variable
+            if index is not None:
+                result_indexes[name] = index
+    
+    # Combine attributes
+    if callable(combine_attrs):
+        attrs = combine_attrs([var.attrs for var in result_vars.values()], Context(merge_collected))
+    elif combine_attrs == "drop":
+        attrs = {}
+    elif combine_attrs == "identical":
+        attrs = result_vars[next(iter(result_vars))].attrs
+        for var in result_vars.values():
+            if not dict_equiv(var.attrs, attrs):
+                raise MergeError("Conflicting attributes")
+    elif combine_attrs == "no_conflicts":
+        attrs = {}
+        for var in result_vars.values():
+            for k, v in var.attrs.items():
+                if k in attrs and attrs[k] != v:
+                    raise MergeError(f"Conflicting attribute {k}")
+                attrs[k] = v
+    elif combine_attrs == "drop_conflicts":
+        attrs = {}
+        for var in result_vars.values():
+            for k, v in var.attrs.items():
+                if k not in attrs:
+                    attrs[k] = v
+    elif combine_attrs == "override":
+        attrs = result_vars[next(iter(result_vars))].attrs
+    else:
+        raise ValueError(f"Unsupported combine_attrs option: {combine_attrs}")
+    
+    for var in result_vars.values():
+        var.attrs = attrs
+    
+    return result_vars, result_indexes
 
 def collect_variables_and_indexes(list_of_mappings: Iterable[DatasetLike], indexes: Mapping[Any, Any] | None=None) -> dict[Hashable, list[MergeElement]]:
     """Collect variables and indexes from list of mappings of xarray objects.
