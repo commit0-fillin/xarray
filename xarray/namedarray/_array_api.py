@@ -39,7 +39,8 @@ def astype(x: NamedArray[_ShapeType, Any], dtype: _DType, /, *, copy: bool=True)
     <xarray.NamedArray (x: 2)> Size: 8B
     array([1, 2], dtype=int32)
     """
-    pass
+    new_data = x.data.astype(dtype, copy=copy)
+    return x._new(data=new_data)
 
 def imag(x: NamedArray[_ShapeType, np.dtype[_SupportsImag[_ScalarType]]], /) -> NamedArray[_ShapeType, np.dtype[_ScalarType]]:
     """
@@ -66,7 +67,7 @@ def imag(x: NamedArray[_ShapeType, np.dtype[_SupportsImag[_ScalarType]]], /) -> 
     <xarray.NamedArray (x: 2)> Size: 16B
     array([2., 4.])
     """
-    pass
+    return x._new(data=np.imag(x.data))
 
 def real(x: NamedArray[_ShapeType, np.dtype[_SupportsReal[_ScalarType]]], /) -> NamedArray[_ShapeType, np.dtype[_ScalarType]]:
     """
@@ -93,7 +94,7 @@ def real(x: NamedArray[_ShapeType, np.dtype[_SupportsReal[_ScalarType]]], /) -> 
     <xarray.NamedArray (x: 2)> Size: 16B
     array([1., 2.])
     """
-    pass
+    return x._new(data=np.real(x.data))
 
 def expand_dims(x: NamedArray[Any, _DType], /, *, dim: _Dim | Default=_default, axis: _Axis=0) -> NamedArray[Any, _DType]:
     """
@@ -126,7 +127,11 @@ def expand_dims(x: NamedArray[Any, _DType], /, *, dim: _Dim | Default=_default, 
     array([[[1., 2.],
             [3., 4.]]])
     """
-    pass
+    new_data = np.expand_dims(x.data, axis=axis)
+    new_dims = list(x.dims)
+    new_dim = dim if dim is not _default else f"dim_{len(x.dims)}"
+    new_dims.insert(axis, new_dim)
+    return x._new(dims=tuple(new_dims), data=new_data)
 
 def permute_dims(x: NamedArray[Any, _DType], axes: _Axes) -> NamedArray[Any, _DType]:
     """
@@ -146,4 +151,6 @@ def permute_dims(x: NamedArray[Any, _DType], axes: _Axes) -> NamedArray[Any, _DT
         data type as x.
 
     """
-    pass
+    new_data = np.transpose(x.data, axes)
+    new_dims = tuple(x.dims[i] for i in axes)
+    return x._new(dims=new_dims, data=new_data)
