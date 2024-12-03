@@ -42,7 +42,18 @@ def _wrap_then_attach_to_cls(target_cls_dict, source_cls, methods_to_set, wrap_f
     wrap_func : callable, optional
         Function to decorate each method with. Must have the same return type as the method.
     """
-    pass
+    for method_name, method in methods_to_set:
+        if hasattr(source_cls, method_name):
+            def wrapped_method(self, *args, **kwargs):
+                return getattr(self, method_name)(*args, **kwargs)
+            
+            if wrap_func:
+                wrapped_method = wrap_func(wrapped_method)
+            
+            wrapped_method.__name__ = method_name
+            wrapped_method.__doc__ = insert_doc_addendum(getattr(source_cls, method_name).__doc__, _MAPPED_DOCSTRING_ADDENDUM)
+            
+            target_cls_dict[method_name] = wrapped_method
 
 def insert_doc_addendum(docstring: str | None, addendum: str) -> str | None:
     """Insert addendum after first paragraph or at the end of the docstring.
@@ -54,7 +65,19 @@ def insert_doc_addendum(docstring: str | None, addendum: str) -> str | None:
     don't, just have the addendum appeneded after. None values are returned.
 
     """
-    pass
+    if docstring is None:
+        return None
+    
+    # Try to find the end of the first paragraph
+    match = re.search(r'\n\s*\n', docstring)
+    
+    if match:
+        # Insert addendum after the first paragraph
+        insert_point = match.start()
+        return docstring[:insert_point] + '\n\n' + addendum + docstring[insert_point:]
+    else:
+        # If no clear paragraph break, append to the end
+        return docstring + '\n\n' + addendum
 
 class MappedDatasetMethodsMixin:
     """
