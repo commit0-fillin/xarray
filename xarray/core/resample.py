@@ -32,7 +32,9 @@ class Resample(GroupBy[T_Xarray]):
 
     def _drop_coords(self) -> T_Xarray:
         """Drop non-dimension coordinates along the resampled dimension."""
-        pass
+        obj = self._obj
+        dim = self._dim
+        return obj.drop_vars([c for c in obj.coords if dim in obj[c].dims and c != dim])
 
     def pad(self, tolerance: float | Iterable[float] | str | None=None) -> T_Xarray:
         """Forward fill new values at up-sampled frequency.
@@ -51,7 +53,7 @@ class Resample(GroupBy[T_Xarray]):
         -------
         padded : DataArray or Dataset
         """
-        pass
+        return self._obj.resample(self._dim, self.grouper.freq).pad(tolerance=tolerance)
     ffill = pad
 
     def backfill(self, tolerance: float | Iterable[float] | str | None=None) -> T_Xarray:
@@ -71,7 +73,7 @@ class Resample(GroupBy[T_Xarray]):
         -------
         backfilled : DataArray or Dataset
         """
-        pass
+        return self._obj.resample(self._dim, self.grouper.freq).backfill(tolerance=tolerance)
     bfill = backfill
 
     def nearest(self, tolerance: float | Iterable[float] | str | None=None) -> T_Xarray:
@@ -92,7 +94,7 @@ class Resample(GroupBy[T_Xarray]):
         -------
         upsampled : DataArray or Dataset
         """
-        pass
+        return self._obj.resample(self._dim, self.grouper.freq).nearest(tolerance=tolerance)
 
     def interpolate(self, kind: InterpOptions='linear', **kwargs) -> T_Xarray:
         """Interpolate up-sampled data using the original data as knots.
@@ -121,11 +123,21 @@ class Resample(GroupBy[T_Xarray]):
         scipy.interpolate.interp1d
 
         """
-        pass
+        return self._interpolate(kind=kind, **kwargs)
 
     def _interpolate(self, kind='linear', **kwargs) -> T_Xarray:
         """Apply scipy.interpolate.interp1d along resampling dimension."""
-        pass
+        from scipy import interpolate
+
+        obj = self._obj
+        dim = self._dim
+        index = obj.get_index(dim)
+        new_index = pd.date_range(start=index[0], end=index[-1], freq=self.grouper.freq)
+
+        interpolator = interpolate.interp1d(index.astype(float), obj.values, kind=kind, axis=obj.get_axis_num(dim), **kwargs)
+        new_values = interpolator(new_index.astype(float))
+
+        return obj.__class__(new_values, coords={dim: new_index, **{k: v for k, v in obj.coords.items() if k != dim}}, attrs=obj.attrs)
 
 class DataArrayResample(Resample['DataArray'], DataArrayGroupByBase, DataArrayResampleAggregations):
     """DataArrayGroupBy object specialized to time resampling operations over a
@@ -157,7 +169,9 @@ class DataArrayResample(Resample['DataArray'], DataArrayGroupByBase, DataArrayRe
             Array with summarized data and the indicated dimension(s)
             removed.
         """
-        pass
+        if dim is None:
+            dim = self._dim
+        return self._obj.resample({self._dim: self.grouper.freq}).reduce(func, dim=dim, keep_attrs=keep_attrs, keepdims=keepdims, **kwargs)
 
     def map(self, func: Callable[..., Any], args: tuple[Any, ...]=(), shortcut: bool | None=False, **kwargs: Any) -> DataArray:
         """Apply a function to each array in the group and concatenate them
@@ -201,7 +215,8 @@ class DataArrayResample(Resample['DataArray'], DataArrayGroupByBase, DataArrayRe
         applied : DataArray
             The result of splitting, applying and combining this array.
         """
-        pass
+        resampled = self._obj.resample({self._dim: self.grouper.freq})
+        return resampled.map(func, args=args, shortcut=shortcut, **kwargs)
 
     def apply(self, func, args=(), shortcut=None, **kwargs):
         """
@@ -211,7 +226,7 @@ class DataArrayResample(Resample['DataArray'], DataArrayGroupByBase, DataArrayRe
         --------
         DataArrayResample.map
         """
-        pass
+        return self.map(func, args=args, shortcut=shortcut, **kwargs)
 
     def asfreq(self) -> DataArray:
         """Return values of original object at the new up-sampling frequency;
@@ -221,7 +236,7 @@ class DataArrayResample(Resample['DataArray'], DataArrayGroupByBase, DataArrayRe
         -------
         resampled : DataArray
         """
-        pass
+        return self._obj.resample({self._dim: self.grouper.freq}).asfreq()
 
 class DatasetResample(Resample['Dataset'], DatasetGroupByBase, DatasetResampleAggregations):
     """DatasetGroupBy object specialized to resampling a specified dimension"""
@@ -256,7 +271,8 @@ class DatasetResample(Resample['Dataset'], DatasetGroupByBase, DatasetResampleAg
         applied : Dataset
             The result of splitting, applying and combining this dataset.
         """
-        pass
+        resampled = self._obj.resample({self._dim: self.grouper.freq})
+        return resampled.map(func, args=args, shortcut=shortcut, **kwargs)
 
     def apply(self, func, args=(), shortcut=None, **kwargs):
         """
@@ -266,7 +282,7 @@ class DatasetResample(Resample['Dataset'], DatasetGroupByBase, DatasetResampleAg
         --------
         DataSetResample.map
         """
-        pass
+        return self.map(func, args=args, shortcut=shortcut, **kwargs)
 
     def reduce(self, func: Callable[..., Any], dim: Dims=None, *, axis: int | Sequence[int] | None=None, keep_attrs: bool | None=None, keepdims: bool=False, shortcut: bool=True, **kwargs: Any) -> Dataset:
         """Reduce the items in this group by applying `func` along the
@@ -293,7 +309,9 @@ class DatasetResample(Resample['Dataset'], DatasetGroupByBase, DatasetResampleAg
             Array with summarized data and the indicated dimension(s)
             removed.
         """
-        pass
+        if dim is None:
+            dim = self._dim
+        return self._obj.resample({self._dim: self.grouper.freq}).reduce(func, dim=dim, keep_attrs=keep_attrs, keepdims=keepdims, **kwargs)
 
     def asfreq(self) -> Dataset:
         """Return values of original object at the new up-sampling frequency;
@@ -303,4 +321,4 @@ class DatasetResample(Resample['Dataset'], DatasetGroupByBase, DatasetResampleAg
         -------
         resampled : Dataset
         """
-        pass
+        return self._obj.resample({self._dim: self.grouper.freq}).asfreq()
