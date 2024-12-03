@@ -22,6 +22,29 @@ class DaskManager(ChunkManagerEntrypoint['DaskArray']):
         from dask.array import Array
         self.array_cls = Array
 
-    def normalize_chunks(self, chunks: T_Chunks | _NormalizedChunks, shape: tuple[int, ...] | None=None, limit: int | None=None, dtype: _DType_co | None=None, previous_chunks: _NormalizedChunks | None=None) -> Any:
-        """Called by open_dataset"""
-        pass
+    def normalize_chunks(self, chunks: T_Chunks | _NormalizedChunks, shape: tuple[int, ...] | None=None, limit: int | None=None, dtype: _DType_co | None=None, previous_chunks: _NormalizedChunks | None=None) -> _NormalizedChunks:
+        """
+        Normalize given chunking pattern into an explicit tuple of tuples representation.
+
+        Parameters
+        ----------
+        chunks : tuple, int, dict, or string
+            The chunks to be normalized.
+        shape : tuple of ints, optional
+            The shape of the array
+        limit : int, optional
+            The maximum block size to target in bytes,
+            if freedom is given to choose
+        dtype : np.dtype, optional
+            The dtype of the array
+        previous_chunks : tuple of tuples of ints, optional
+            Chunks from a previous array that we should use for inspiration when
+            rechunking dimensions automatically.
+
+        Returns
+        -------
+        normalized_chunks : tuple of tuples of ints
+            The normalized chunks.
+        """
+        import dask.array as da
+        return da.core.normalize_chunks(chunks, shape, limit, dtype, previous_chunks)
