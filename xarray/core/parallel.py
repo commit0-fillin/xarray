@@ -28,17 +28,35 @@ def make_meta(obj):
     backend.
     If obj is neither a DataArray nor Dataset, return it unaltered.
     """
-    pass
+    from xarray.core.dataarray import DataArray
+    from xarray.core.dataset import Dataset
+
+    if isinstance(obj, (DataArray, Dataset)):
+        if isinstance(obj, DataArray):
+            data = np.array([], dtype=obj.dtype)
+            coords = {k: make_meta(v) for k, v in obj.coords.items()}
+            return DataArray(data, coords=coords, dims=obj.dims, name=obj.name, attrs=obj.attrs)
+        else:
+            data_vars = {k: make_meta(v) for k, v in obj.data_vars.items()}
+            coords = {k: make_meta(v) for k, v in obj.coords.items()}
+            return Dataset(data_vars, coords=coords, attrs=obj.attrs)
+    return obj
 
 def infer_template(func: Callable[..., T_Xarray], obj: DataArray | Dataset, *args, **kwargs) -> T_Xarray:
     """Infer return object by running the function on meta objects."""
-    pass
+    meta_obj = make_meta(obj)
+    meta_args = [make_meta(arg) if isinstance(arg, (DataArray, Dataset)) else arg for arg in args]
+    meta_kwargs = {k: make_meta(v) if isinstance(v, (DataArray, Dataset)) else v for k, v in kwargs.items()}
+    return func(meta_obj, *meta_args, **meta_kwargs)
 
 def make_dict(x: DataArray | Dataset) -> dict[Hashable, Any]:
     """Map variable name to numpy(-like) data
     (Dataset.to_dict() is too complicated).
     """
-    pass
+    if isinstance(x, DataArray):
+        return {x.name: x.data}
+    else:
+        return {k: v.data for k, v in x.variables.items()}
 
 def subset_dataset_to_block(graph: dict, gname: str, dataset: Dataset, input_chunk_bounds, chunk_index):
     """
@@ -46,7 +64,26 @@ def subset_dataset_to_block(graph: dict, gname: str, dataset: Dataset, input_chu
     Block extents are determined by input_chunk_bounds.
     Also subtasks that subset the constituent variables of a dataset.
     """
-    pass
+    from dask.highlevelgraph import HighLevelGraph
+
+    def subset_variable(var, input_chunk_bounds, chunk_index):
+        indexers = {dim: slice(input_chunk_bounds[dim][i], input_chunk_bounds[dim][i+1])
+                    for dim, i in zip(var.dims, chunk_index)}
+        return var.isel(indexers)
+
+    var_tasks = {}
+    for name, var in dataset.variables.items():
+        var_name = f'{gname}-{name}'
+        var_tasks[var_name] = (subset_variable, var, input_chunk_bounds, chunk_index)
+
+    def subset_dataset(variables):
+        return Dataset(variables)
+
+    ds_name = f'{gname}-subset'
+    ds_task = (subset_dataset, var_tasks)
+
+    graph.update(HighLevelGraph.from_collections(ds_name, ds_task, dependencies=var_tasks))
+    return ds_name
 
 def map_blocks(func: Callable[..., T_Xarray], obj: DataArray | Dataset, args: Sequence[Any]=(), kwargs: Mapping[str, Any] | None=None, template: DataArray | Dataset | None=None) -> T_Xarray:
     """Apply a function to each block of a DataArray or Dataset.
