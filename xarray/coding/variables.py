@@ -36,11 +36,44 @@ class VariableCoder:
 
     def encode(self, variable: Variable, name: T_Name=None) -> Variable:
         """Convert an encoded variable to a decoded variable"""
-        pass
+        if name is None:
+            name = variable.name
+        
+        data = variable.data
+        attrs = variable.attrs.copy()
+        encoding = variable.encoding.copy()
+
+        if "dtype" in encoding:
+            data = data.astype(encoding["dtype"])
+        
+        if "scale_factor" in encoding or "add_offset" in encoding:
+            data = (data - encoding.get("add_offset", 0)) / encoding.get("scale_factor", 1)
+        
+        if "_FillValue" in encoding:
+            data = duck_array_ops.where(data == encoding["_FillValue"], np.nan, data)
+        
+        return Variable(variable.dims, data, attrs, encoding)
 
     def decode(self, variable: Variable, name: T_Name=None) -> Variable:
-        """Convert an decoded variable to a encoded variable"""
-        pass
+        """Convert a decoded variable to an encoded variable"""
+        if name is None:
+            name = variable.name
+        
+        data = variable.data
+        attrs = variable.attrs.copy()
+        encoding = variable.encoding.copy()
+
+        if "dtype" in encoding:
+            data = data.astype(encoding["dtype"])
+        
+        if "scale_factor" in encoding or "add_offset" in encoding:
+            data = data * encoding.get("scale_factor", 1) + encoding.get("add_offset", 0)
+        
+        if "_FillValue" in encoding:
+            fill_value = encoding["_FillValue"]
+            data = duck_array_ops.where(np.isnan(data), fill_value, data)
+        
+        return Variable(variable.dims, data, attrs, encoding)
 
 class _ElementwiseFunctionArray(indexing.ExplicitlyIndexedNDArrayMixin):
     """Lazily computed array holding values of elemwise-function.
@@ -130,7 +163,11 @@ def lazy_elemwise_func(array, func: Callable, dtype: np.typing.DTypeLike):
     -------
     Either a dask.array.Array or _ElementwiseFunctionArray.
     """
-    pass
+    if is_duck_dask_array(array):
+        import dask.array as da
+        return da.map_overlap(func, array, dtype=dtype)
+    else:
+        return _ElementwiseFunctionArray(array, func, dtype)
 
 def pop_to(source: MutableMapping, dest: MutableMapping, key: Hashable, name: T_Name=None) -> Any:
     """
@@ -138,27 +175,63 @@ def pop_to(source: MutableMapping, dest: MutableMapping, key: Hashable, name: T_
     None values are not passed on.  If k already exists in dest an
     error is raised.
     """
-    pass
+    value = source.pop(key, None)
+    if value is not None:
+        if key in dest:
+            raise ValueError(f"'{key}' already exists in destination")
+        dest[key] = value
+    return value
 
 def _apply_mask(data: np.ndarray, encoded_fill_values: list, decoded_fill_value: Any, dtype: np.typing.DTypeLike) -> np.ndarray:
     """Mask all matching values in a NumPy arrays."""
-    pass
+    if not encoded_fill_values:
+        return data
+
+    condition = False
+    for fill_value in encoded_fill_values:
+        condition |= data == fill_value
+
+    return np.where(condition, decoded_fill_value, data).astype(dtype)
 
 def _check_fill_values(attrs, name, dtype):
-    """ "Check _FillValue and missing_value if available.
+    """Check _FillValue and missing_value if available.
 
     Return dictionary with raw fill values and set with encoded fill values.
 
     Issue SerializationWarning if appropriate.
     """
-    pass
+    fill_values = {}
+    encoded_fill_values = set()
+
+    for attr_name in ['_FillValue', 'missing_value']:
+        value = attrs.get(attr_name)
+        if value is not None:
+            fill_values[attr_name] = value
+            if np.array(value).dtype.kind != 'O':
+                encoded_fill_values.add(np.array(value).astype(dtype).item())
+
+    if len(fill_values) == 2:
+        if fill_values['_FillValue'] != fill_values['missing_value']:
+            warnings.warn(
+                f"Variable '{name}' has multiple fill values {fill_values}, "
+                "but encoding can only support one. Prioritizing _FillValue.",
+                SerializationWarning,
+                stacklevel=3,
+            )
+
+    return fill_values, encoded_fill_values
 
 class CFMaskCoder(VariableCoder):
     """Mask or unmask fill values according to CF conventions."""
 
 def _choose_float_dtype(dtype: np.dtype, mapping: MutableMapping) -> type[np.floating[Any]]:
     """Return a float dtype that can losslessly represent `dtype` values."""
-    pass
+    if np.issubdtype(dtype, np.floating):
+        return dtype.type
+    elif np.issubdtype(dtype, np.integer):
+        return np.float64 if dtype.itemsize > 4 else np.float32
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype}")
 
 class CFScaleOffsetCoder(VariableCoder):
     """Scale and offset variables according to CF conventions.
