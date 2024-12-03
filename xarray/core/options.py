@@ -182,9 +182,14 @@ def get_options():
     """
     Get options for xarray.
 
+    Returns
+    -------
+    dict
+        A dictionary containing the current options for xarray.
+
     See Also
-    ----------
+    --------
     set_options
 
     """
-    pass
+    return dict(OPTIONS)
