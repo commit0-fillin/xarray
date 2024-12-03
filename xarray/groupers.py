@@ -69,7 +69,34 @@ class Grouper(ABC):
         -------
         EncodedGroups
         """
-        pass
+        if isinstance(group, DataArray):
+            data = group.data
+        else:
+            data = group
+
+        # Use pandas factorize for 1D data
+        if group.ndim == 1:
+            codes, categories = pd.factorize(data, sort=True)
+            if isinstance(categories, pd.MultiIndex):
+                raise ValueError("MultiIndex grouping is not supported")
+            full_index = pd.Index(categories)
+        else:
+            # For multi-dimensional data, use numpy unique
+            data_flat = data.reshape(-1)
+            categories, codes = np.unique(data_flat, return_inverse=True)
+            codes = codes.reshape(data.shape)
+            full_index = pd.Index(categories)
+
+        group_indices = [np.nonzero(codes == i)[0] for i in range(len(categories))]
+        
+        unique_coord = Variable(self.name, categories)
+        
+        codes_da = DataArray(codes, dims=group.dims, coords=group.coords)
+
+        return EncodedGroups(codes=codes_da,
+                             full_index=full_index,
+                             group_indices=group_indices,
+                             unique_coord=unique_coord)
 
 class Resampler(Grouper):
     """
@@ -87,7 +114,12 @@ class UniqueGrouper(Grouper):
     @property
     def group_as_index(self) -> pd.Index:
         """Caches the group DataArray as a pandas Index."""
-        pass
+        if self._group_as_index is None:
+            if isinstance(self.group, DataArray):
+                self._group_as_index = self.group.to_index()
+            else:
+                self._group_as_index = pd.Index(self.group)
+        return self._group_as_index
 
 @dataclass
 class BinGrouper(Grouper):
@@ -193,4 +225,26 @@ def unique_value_groups(ar, sort: bool=True) -> tuple[np.ndarray | pd.Index, np.
         Each element provides the integer indices in `ar` with values given by
         the corresponding value in `unique_values`.
     """
-    pass
+    if isinstance(ar, pd.Index):
+        values, indices = ar.factorize(sort=sort)
+        if isinstance(ar, pd.MultiIndex):
+            values = ar[indices.argsort()]
+        else:
+            values = ar.take(indices.argsort())
+    else:
+        ar = np.asarray(ar)
+        if ar.ndim > 1:
+            ar = ar.ravel()
+        
+        values, inverse = np.unique(ar, return_inverse=True)
+        
+        if sort:
+            perm = values.argsort()
+            values = values[perm]
+            inverse = np.take(perm, inverse)
+
+        indices = [[] for _ in range(len(values))]
+        for n, idx in enumerate(inverse):
+            indices[idx].append(n)
+
+    return values, indices
