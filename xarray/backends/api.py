@@ -37,7 +37,11 @@ ENGINES = {'netcdf4': backends.NetCDF4DataStore.open, 'scipy': backends.ScipyDat
 
 def _validate_dataset_names(dataset: Dataset) -> None:
     """DataArray.name and Dataset keys must be a string or None"""
-    pass
+    for k in dataset.variables:
+        if not isinstance(k, str) and k is not None:
+            raise ValueError("Dataset variable names must be strings or None")
+    if dataset.name is not None and not isinstance(dataset.name, str):
+        raise ValueError("Dataset name must be a string or None")
 
 def _validate_attrs(dataset, invalid_netcdf=False):
     """`attrs` must have a string key and a value which is either: a number,
@@ -48,11 +52,28 @@ def _validate_attrs(dataset, invalid_netcdf=False):
     A numpy.bool_ is only allowed when using the h5netcdf engine with
     `invalid_netcdf=True`.
     """
-    pass
+    def check_attr(name, value):
+        if not isinstance(name, str):
+            raise ValueError("Attribute names must be strings")
+        if isinstance(value, (str, numbers.Number, np.ndarray)):
+            return
+        if isinstance(value, (list, tuple)):
+            if all(isinstance(v, (str, numbers.Number)) for v in value):
+                return
+        if invalid_netcdf and isinstance(value, np.bool_):
+            return
+        raise ValueError(f"Invalid attribute value for {name}: {value}")
+
+    for k, v in dataset.attrs.items():
+        check_attr(k, v)
 
 def _finalize_store(write, store):
     """Finalize this store by explicitly syncing and closing"""
-    pass
+    if write:
+        if hasattr(store, 'sync'):
+            store.sync()
+        if hasattr(store, 'close'):
+            store.close()
 
 def load_dataset(filename_or_obj, **kwargs) -> Dataset:
     """Open, load into memory, and close a Dataset from a file or file-like
@@ -73,7 +94,8 @@ def load_dataset(filename_or_obj, **kwargs) -> Dataset:
     --------
     open_dataset
     """
-    pass
+    with open_dataset(filename_or_obj, **kwargs) as ds:
+        return ds.load()
 
 def load_dataarray(filename_or_obj, **kwargs):
     """Open, load into memory, and close a DataArray from a file or file-like
@@ -94,7 +116,8 @@ def load_dataarray(filename_or_obj, **kwargs):
     --------
     open_dataarray
     """
-    pass
+    with open_dataarray(filename_or_obj, **kwargs) as da:
+        return da.load()
 
 def open_dataset(filename_or_obj: str | os.PathLike[Any] | BufferedIOBase | AbstractDataStore, *, engine: T_Engine=None, chunks: T_Chunks=None, cache: bool | None=None, decode_cf: bool | None=None, mask_and_scale: bool | Mapping[str, bool] | None=None, decode_times: bool | Mapping[str, bool] | None=None, decode_timedelta: bool | Mapping[str, bool] | None=None, use_cftime: bool | Mapping[str, bool] | None=None, concat_characters: bool | Mapping[str, bool] | None=None, decode_coords: Literal['coordinates', 'all'] | bool | None=None, drop_variables: str | Iterable[str] | None=None, inline_array: bool=False, chunked_array_type: str | None=None, from_array_kwargs: dict[str, Any] | None=None, backend_kwargs: dict[str, Any] | None=None, **kwargs) -> Dataset:
     """Open and decode a dataset from a file or file-like object.
