@@ -9,7 +9,7 @@ def count_not_none(*args) -> int:
 
     Copied from pandas.core.common.count_not_none (not part of the public API)
     """
-    pass
+    return sum(arg is not None for arg in args)
 
 class _NoDefault(Enum):
     """Used by pandas to specify a default value for a deprecated argument.
@@ -34,4 +34,5 @@ def nanosecond_precision_timestamp(*args, **kwargs) -> pd.Timestamp:
     Note this function should no longer be needed after addressing GitHub issue
     #7493.
     """
-    pass
+    ts = pd.Timestamp(*args, **kwargs)
+    return ts.as_unit('ns')
