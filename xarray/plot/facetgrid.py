@@ -24,7 +24,10 @@ def _nicetitle(coord, value, maxchar, template):
     """
     Put coord, value in template and truncate at maxchar
     """
-    pass
+    title = template.format(coord=coord, value=value)
+    if len(title) > maxchar:
+        title = title[:maxchar - 3] + '...'
+    return title
 T_FacetGrid = TypeVar('T_FacetGrid', bound='FacetGrid')
 
 class FacetGrid(Generic[T_DataArrayOrSet]):
@@ -124,6 +127,7 @@ class FacetGrid(Generic[T_DataArrayOrSet]):
         rep_row = row is not None and (not data[row].to_index().is_unique)
         if rep_col or rep_row:
             raise ValueError('Coordinates used for faceting cannot contain repeated (nonunique) values.')
+        
         single_group: bool | Hashable
         if col and row:
             single_group = False
@@ -134,34 +138,41 @@ class FacetGrid(Generic[T_DataArrayOrSet]):
                 warnings.warn('Ignoring col_wrap since both col and row were passed')
         elif row and (not col):
             single_group = row
+            nrow = len(data[row])
+            ncol = 1
+            nfacet = nrow
         elif not row and col:
             single_group = col
+            ncol = len(data[col])
+            nrow = 1
+            nfacet = ncol
         else:
             raise ValueError('Pass a coordinate name as an argument for row or col')
-        if single_group:
-            nfacet = len(data[single_group])
-            if col:
-                ncol = nfacet
-            if row:
-                ncol = 1
-            if col_wrap is not None:
-                ncol = col_wrap
+        
+        if single_group and col_wrap is not None:
+            ncol = min(col_wrap, nfacet)
             nrow = int(np.ceil(nfacet / ncol))
+        
         subplot_kws = {} if subplot_kws is None else subplot_kws
         if figsize is None:
             cbar_space = 1
             figsize = (ncol * size * aspect + cbar_space, nrow * size)
+        
         fig, axs = plt.subplots(nrow, ncol, sharex=sharex, sharey=sharey, squeeze=False, figsize=figsize, subplot_kw=subplot_kws)
+        
         col_names = list(data[col].to_numpy()) if col else []
         row_names = list(data[row].to_numpy()) if row else []
+        
         if single_group:
             full: list[dict[Hashable, Any] | None] = [{single_group: x} for x in data[single_group].to_numpy()]
-            empty: list[dict[Hashable, Any] | None] = [None for x in range(nrow * ncol - len(full))]
+            empty: list[dict[Hashable, Any] | None] = [None for _ in range(nrow * ncol - len(full))]
             name_dict_list = full + empty
         else:
             rowcols = itertools.product(row_names, col_names)
             name_dict_list = [{row: r, col: c} for r, c in rowcols]
+        
         name_dicts = np.array(name_dict_list).reshape(nrow, ncol)
+        
         self.data = data
         self.name_dicts = name_dicts
         self.fig = fig
@@ -206,7 +217,15 @@ class FacetGrid(Generic[T_DataArrayOrSet]):
         self : FacetGrid object
 
         """
-        pass
+        for ax, name_dict in zip(self.axs.flat, self.name_dicts.flat):
+            if name_dict is not None:
+                subset = self.data.sel(**name_dict)
+                func(subset, x=x, y=y, ax=ax, **kwargs)
+            else:
+                ax.set_axis_off()
+
+        self._finalize_grid(x, y)
+        return self
 
     def map_plot1d(self: T_FacetGrid, func: Callable, x: Hashable | None, y: Hashable | None, *, z: Hashable | None=None, hue: Hashable | None=None, markersize: Hashable | None=None, linewidth: Hashable | None=None, **kwargs: Any) -> T_FacetGrid:
         """
@@ -229,15 +248,33 @@ class FacetGrid(Generic[T_DataArrayOrSet]):
         self : FacetGrid object
 
         """
-        pass
+        for ax, name_dict in zip(self.axs.flat, self.name_dicts.flat):
+            if name_dict is not None:
+                subset = self.data.sel(**name_dict)
+                func(subset, x=x, y=y, z=z, hue=hue, markersize=markersize, linewidth=linewidth, ax=ax, **kwargs)
+            else:
+                ax.set_axis_off()
+
+        self._finalize_grid(x, y)
+        return self
 
     def _finalize_grid(self, *axlabels: Hashable) -> None:
         """Finalize the annotations and layout."""
-        pass
+        if not self._finalized:
+            self.set_axis_labels(*axlabels)
+            self.set_titles()
+            self.fig.tight_layout()
+            
+            for ax in self.axs.flat:
+                ax.tick_params(labelbottom=True, labelleft=True)
+            
+            self._finalized = True
 
     def add_colorbar(self, **kwargs: Any) -> None:
         """Draw a colorbar."""
-        pass
+        if self._mappables:
+            cbar = self.fig.colorbar(self._mappables[-1], ax=self.axs.ravel().tolist(), **kwargs)
+            self.cbar = cbar
 
     def _get_largest_lims(self) -> dict[str, tuple[float, float]]:
         """
@@ -255,7 +292,21 @@ class FacetGrid(Generic[T_DataArrayOrSet]):
         >>> round(fg._get_largest_lims()["x"][0], 3)
         np.float64(-0.334)
         """
-        pass
+        lims_largest = {}
+        for ax in self.axs.flat:
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            if 'x' not in lims_largest:
+                lims_largest['x'] = xlim
+            else:
+                lims_largest['x'] = (min(lims_largest['x'][0], xlim[0]),
+                                     max(lims_largest['x'][1], xlim[1]))
+            if 'y' not in lims_largest:
+                lims_largest['y'] = ylim
+            else:
+                lims_largest['y'] = (min(lims_largest['y'][0], ylim[0]),
+                                     max(lims_largest['y'][1], ylim[1]))
+        return lims_largest
 
     def _set_lims(self, x: tuple[float, float] | None=None, y: tuple[float, float] | None=None, z: tuple[float, float] | None=None) -> None:
         """
@@ -278,23 +329,43 @@ class FacetGrid(Generic[T_DataArrayOrSet]):
         >>> fg.axs[0, 0].get_xlim(), fg.axs[0, 0].get_ylim()
         ((np.float64(-0.3), np.float64(0.3)), (np.float64(0.0), np.float64(2.0)))
         """
-        pass
+        for ax in self.axs.flat:
+            if x is not None:
+                ax.set_xlim(x)
+            if y is not None:
+                ax.set_ylim(y)
+            if z is not None and hasattr(ax, 'set_zlim'):
+                ax.set_zlim(z)
 
     def set_axis_labels(self, *axlabels: Hashable) -> None:
         """Set axis labels on the left column and bottom row of the grid."""
-        pass
+        self.set_xlabels(axlabels[0] if len(axlabels) > 0 else None)
+        if len(axlabels) > 1:
+            self.set_ylabels(axlabels[1])
+        if len(axlabels) > 2:
+            self.set_zlabels(axlabels[2])
 
     def set_xlabels(self, label: None | str=None, **kwargs: Any) -> None:
         """Label the x axis on the bottom row of the grid."""
-        pass
+        if label is None:
+            label = self._x_var
+        for ax in self.axs[-1, :]:
+            ax.set_xlabel(label, **kwargs)
 
     def set_ylabels(self, label: None | str=None, **kwargs: Any) -> None:
         """Label the y axis on the left column of the grid."""
-        pass
+        if label is None:
+            label = self._y_var
+        for ax in self.axs[:, 0]:
+            ax.set_ylabel(label, **kwargs)
 
     def set_zlabels(self, label: None | str=None, **kwargs: Any) -> None:
         """Label the z axis."""
-        pass
+        if label is None:
+            return
+        for ax in self.axs.flat:
+            if hasattr(ax, 'set_zlabel'):
+                ax.set_zlabel(label, **kwargs)
 
     def set_titles(self, template: str='{coord} = {value}', maxchar: int=30, size=None, **kwargs) -> None:
         """
@@ -314,7 +385,15 @@ class FacetGrid(Generic[T_DataArrayOrSet]):
         self: FacetGrid object
 
         """
-        pass
+        for ax, name_dict in zip(self.axs.flat, self.name_dicts.flat):
+            if name_dict is None:
+                continue
+            title = []
+            for k, v in name_dict.items():
+                title.append(_nicetitle(k, v, maxchar, template))
+            title = '\n'.join(title)
+            ax.set_title(title, size=size, **kwargs)
+        return self
 
     def set_ticks(self, max_xticks: int=_NTICKS, max_yticks: int=_NTICKS, fontsize: str | int=_FONTSIZE) -> None:
         """
@@ -332,7 +411,15 @@ class FacetGrid(Generic[T_DataArrayOrSet]):
         self : FacetGrid object
 
         """
-        pass
+        import matplotlib.ticker as ticker
+        
+        for ax in self.axs.flat:
+            ax.xaxis.set_major_locator(ticker.MaxNLocator(max_xticks))
+            ax.yaxis.set_major_locator(ticker.MaxNLocator(max_yticks))
+            for axis in (ax.xaxis, ax.yaxis):
+                axis.set_tick_params(labelsize=fontsize)
+        
+        return self
 
     def map(self: T_FacetGrid, func: Callable, *args: Hashable, **kwargs: Any) -> T_FacetGrid:
         """
@@ -357,7 +444,19 @@ class FacetGrid(Generic[T_DataArrayOrSet]):
         self : FacetGrid object
 
         """
-        pass
+        import matplotlib.pyplot as plt
+
+        for ax, name_dict in zip(self.axs.flat, self.name_dicts.flat):
+            if name_dict is None:
+                ax.set_axis_off()
+                continue
+            data_subset = self.data.sel(**name_dict)
+            plt.sca(ax)
+            inner_args = [data_subset[a].values for a in args]
+            func(*inner_args, **kwargs)
+
+        self._finalize_grid(*args[:2])
+        return self
 
 def _easy_facetgrid(data: T_DataArrayOrSet, plotfunc: Callable, kind: Literal['line', 'dataarray', 'dataset', 'plot1d'], x: Hashable | None=None, y: Hashable | None=None, row: Hashable | None=None, col: Hashable | None=None, col_wrap: int | None=None, sharex: bool=True, sharey: bool=True, aspect: float | None=None, size: float | None=None, subplot_kws: dict[str, Any] | None=None, ax: Axes | None=None, figsize: Iterable[float] | None=None, **kwargs: Any) -> FacetGrid[T_DataArrayOrSet]:
     """
@@ -365,4 +464,27 @@ def _easy_facetgrid(data: T_DataArrayOrSet, plotfunc: Callable, kind: Literal['l
 
     kwargs are the arguments to 2d plotting method
     """
-    pass
+    if ax is not None:
+        raise ValueError("Can't use axes when making faceted plots.")
+    if aspect is None:
+        aspect = 1
+    if size is None:
+        size = 3
+    if figsize is not None:
+        # Figure size overrides aspect and size
+        figsize = (figsize[0], figsize[1])
+    elif col_wrap is not None:
+        figsize = (col_wrap * size * aspect, (col_wrap + 1) * size)
+    
+    facet_grid = FacetGrid(data=data, col=col, row=row, col_wrap=col_wrap,
+                           sharex=sharex, sharey=sharey, figsize=figsize,
+                           aspect=aspect, size=size, subplot_kws=subplot_kws)
+
+    if kind == 'dataarray':
+        return facet_grid.map_dataarray(plotfunc, x, y, **kwargs)
+    elif kind == 'dataset':
+        return facet_grid.map_dataset(plotfunc, x, y, **kwargs)
+    elif kind in ['line', 'plot1d']:
+        return facet_grid.map_plot1d(plotfunc, x, y, **kwargs)
+    else:
+        raise ValueError(f"Unsupported plot kind: {kind}")
