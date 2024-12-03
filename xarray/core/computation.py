@@ -36,11 +36,14 @@ _JOINS_WITHOUT_FILL_VALUES = frozenset({'inner', 'exact'})
 
 def _first_of_type(args, kind):
     """Return either first object of type 'kind' or raise if not found."""
-    pass
+    for arg in args:
+        if isinstance(arg, kind):
+            return arg
+    raise ValueError(f"No object of type {kind} found in arguments")
 
 def _all_of_type(args, kind):
     """Return all objects of type 'kind'"""
-    pass
+    return [arg for arg in args if isinstance(arg, kind)]
 
 class _UFuncSignature:
     """Core dimensions signature for a given function.
@@ -88,7 +91,14 @@ class _UFuncSignature:
 
         Also creates unique names for input_core_dims contained in exclude_dims.
         """
-        pass
+        def _make_dim_string(dims):
+            return ','.join(f'd{i}' if d in exclude_dims else d
+                            for i, d in enumerate(dims))
+
+        input_dims = [_make_dim_string(dims) for dims in self.input_core_dims]
+        output_dims = [_make_dim_string(dims) for dims in self.output_core_dims]
+
+        return f"({'),('.join(input_dims)})->({'),('.join(output_dims)})"
 
 def build_output_coords_and_indexes(args: Iterable[Any], signature: _UFuncSignature, exclude_dims: Set=frozenset(), combine_attrs: CombineAttrsOptions='override') -> tuple[list[dict[Any, Variable]], list[dict[Any, Index]]]:
     """Build output coordinates and indexes for an operation.
@@ -123,7 +133,25 @@ def build_output_coords_and_indexes(args: Iterable[Any], signature: _UFuncSignat
     -------
     Dictionaries of Variable and Index objects with merged coordinates.
     """
-    pass
+    from xarray.core.dataarray import DataArray
+    from xarray.core.dataset import Dataset
+    from xarray.core.merge import merge_coords
+
+    xarray_objs = [arg for arg in args if isinstance(arg, (DataArray, Dataset))]
+    if not xarray_objs:
+        return [], []
+
+    coords = []
+    for obj in xarray_objs:
+        if isinstance(obj, DataArray):
+            coords.append(obj.coords)
+        else:  # Dataset
+            coords.append(obj.coords)
+
+    merged_coords = merge_coords(coords, combine_attrs=combine_attrs)
+    merged_indexes = {dim: merged_coords[dim].to_index() for dim in merged_coords if dim not in exclude_dims}
+
+    return [merged_coords], [merged_indexes]
 
 def apply_dataarray_vfunc(func, *args, signature: _UFuncSignature, join: JoinOptions='inner', exclude_dims=frozenset(), keep_attrs='override') -> tuple[DataArray, ...] | DataArray:
     """Apply a variable level function over DataArray, Variable and/or ndarray
