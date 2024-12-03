@@ -46,7 +46,27 @@ def fillna(data, other, join='left', dataset_join='left'):
         - "left": take only variables from the first object
         - "right": take only variables from the last object
     """
-    pass
+    from xarray.core.alignment import align
+    from xarray.core.dataarray import DataArray
+    from xarray.core.dataset import Dataset
+    
+    if isinstance(data, DataArray):
+        return data.fillna(other)
+    elif isinstance(data, Dataset):
+        if isinstance(other, Dataset):
+            other_vars = other.data_vars
+        else:
+            other_vars = {k: other for k in data.data_vars}
+        
+        aligned_data, aligned_other = align(data, other, join=join, copy=False)
+        
+        for k in aligned_data.data_vars:
+            if k in other_vars:
+                aligned_data[k] = aligned_data[k].fillna(aligned_other[k])
+        
+        return aligned_data
+    else:
+        raise TypeError("fillna only works with DataArray or Dataset objects")
 
 def where_method(self, cond, other=dtypes.NA):
     """Return elements from `self` or `other` depending on `cond`.
@@ -63,7 +83,27 @@ def where_method(self, cond, other=dtypes.NA):
     -------
     Same type as caller.
     """
-    pass
+    from xarray.core.dataarray import DataArray
+    from xarray.core.dataset import Dataset
+    
+    if isinstance(self, DataArray):
+        return self.where(cond, other)
+    elif isinstance(self, Dataset):
+        if isinstance(cond, Dataset):
+            coords = self.coords
+            cond_vars = cond.data_vars
+            other_vars = other.data_vars if isinstance(other, Dataset) else {}
+
+            ds = Dataset(coords=coords)
+            for k in self.data_vars:
+                cond_k = cond_vars.get(k, cond)
+                other_k = other_vars.get(k, other)
+                ds[k] = self[k].where(cond_k, other_k)
+            return ds
+        else:
+            return self.where(cond, other)
+    else:
+        raise TypeError("where_method only works with DataArray or Dataset objects")
 NON_INPLACE_OP = {get_op('i' + name): get_op(name) for name in NUM_BINARY_OPS}
 argsort = _method_wrapper('argsort')
 conj = _method_wrapper('conj')
