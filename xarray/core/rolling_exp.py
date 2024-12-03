@@ -9,12 +9,33 @@ from xarray.core.pdcompat import count_not_none
 from xarray.core.types import T_DataWithCoords
 from xarray.core.utils import module_available
 from xarray.namedarray import pycompat
+import numbagg
 
 def _get_alpha(com: float | None=None, span: float | None=None, halflife: float | None=None, alpha: float | None=None) -> float:
     """
     Convert com, span, halflife to alpha.
     """
-    pass
+    if count_not_none(com, span, halflife, alpha) > 1:
+        raise ValueError("Only one of com, span, halflife, or alpha can be set")
+    
+    if alpha is not None:
+        if not 0 < alpha <= 1:
+            raise ValueError("alpha must be in (0, 1]")
+        return alpha
+    elif com is not None:
+        if com < 0:
+            raise ValueError("com must be >= 0")
+        return 1 / (1 + com)
+    elif span is not None:
+        if span < 1:
+            raise ValueError("span must be >= 1")
+        return 2 / (span + 1)
+    elif halflife is not None:
+        if halflife <= 0:
+            raise ValueError("halflife must be > 0")
+        return 1 - np.exp(np.log(0.5) / halflife)
+    else:
+        raise ValueError("Must set one of com, span, halflife, or alpha")
 
 class RollingExp(Generic[T_DataWithCoords]):
     """
@@ -74,7 +95,15 @@ class RollingExp(Generic[T_DataWithCoords]):
         array([1.        , 1.        , 1.69230769, 1.9       , 1.96694215])
         Dimensions without coordinates: x
         """
-        pass
+        import numbagg
+
+        keep_attrs = _get_keep_attrs(keep_attrs)
+        return self.obj.reduce(
+            numbagg.move_exp_nanmean,
+            dim=self.dim,
+            keep_attrs=keep_attrs,
+            **self.kwargs
+        )
 
     def sum(self, keep_attrs: bool | None=None) -> T_DataWithCoords:
         """
@@ -95,7 +124,15 @@ class RollingExp(Generic[T_DataWithCoords]):
         array([1.        , 1.33333333, 2.44444444, 2.81481481, 2.9382716 ])
         Dimensions without coordinates: x
         """
-        pass
+        import numbagg
+
+        keep_attrs = _get_keep_attrs(keep_attrs)
+        return self.obj.reduce(
+            numbagg.move_exp_nansum,
+            dim=self.dim,
+            keep_attrs=keep_attrs,
+            **self.kwargs
+        )
 
     def std(self) -> T_DataWithCoords:
         """
@@ -111,7 +148,14 @@ class RollingExp(Generic[T_DataWithCoords]):
         array([       nan, 0.        , 0.67936622, 0.42966892, 0.25389527])
         Dimensions without coordinates: x
         """
-        pass
+        import numbagg
+
+        return self.obj.reduce(
+            numbagg.move_exp_nanstd,
+            dim=self.dim,
+            keep_attrs=True,
+            **self.kwargs
+        )
 
     def var(self) -> T_DataWithCoords:
         """
@@ -127,7 +171,14 @@ class RollingExp(Generic[T_DataWithCoords]):
         array([       nan, 0.        , 0.46153846, 0.18461538, 0.06446281])
         Dimensions without coordinates: x
         """
-        pass
+        import numbagg
+
+        return self.obj.reduce(
+            numbagg.move_exp_nanvar,
+            dim=self.dim,
+            keep_attrs=True,
+            **self.kwargs
+        )
 
     def cov(self, other: T_DataWithCoords) -> T_DataWithCoords:
         """
@@ -143,7 +194,17 @@ class RollingExp(Generic[T_DataWithCoords]):
         array([       nan, 0.        , 1.38461538, 0.55384615, 0.19338843])
         Dimensions without coordinates: x
         """
-        pass
+        import numbagg
+
+        return apply_ufunc(
+            numbagg.move_exp_nancov,
+            self.obj,
+            other,
+            input_core_dims=[[self.dim], [self.dim]],
+            kwargs=self.kwargs,
+            dask="allowed",
+            keep_attrs=True,
+        )
 
     def corr(self, other: T_DataWithCoords) -> T_DataWithCoords:
         """
@@ -159,4 +220,14 @@ class RollingExp(Generic[T_DataWithCoords]):
         array([       nan,        nan,        nan, 0.4330127 , 0.48038446])
         Dimensions without coordinates: x
         """
-        pass
+        import numbagg
+
+        return apply_ufunc(
+            numbagg.move_exp_nancorr,
+            self.obj,
+            other,
+            input_core_dims=[[self.dim], [self.dim]],
+            kwargs=self.kwargs,
+            dask="allowed",
+            keep_attrs=True,
+        )
