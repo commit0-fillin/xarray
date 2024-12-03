@@ -65,7 +65,10 @@ class Weighted(Generic[T_Xarray]):
 
     def _check_dim(self, dim: Dims):
         """raise an error if any dimension is missing"""
-        pass
+        if isinstance(dim, str):
+            dim = [dim]
+        if any(d not in self.weights.dims for d in dim):
+            raise ValueError(f"Dimension {dim} not found in weights")
 
     @staticmethod
     def _reduce(da: T_DataArray, weights: T_DataArray, dim: Dims=None, skipna: bool | None=None) -> T_DataArray:
@@ -73,35 +76,72 @@ class Weighted(Generic[T_Xarray]):
 
         for internal use only
         """
-        pass
+        if skipna or (skipna is None and da.dtype.kind in 'cfO'):
+            da = da.where(da.notnull())
+            weights = weights.where(da.notnull())
+
+        return dot(da, weights, dims=dim)
 
     def _sum_of_weights(self, da: T_DataArray, dim: Dims=None) -> T_DataArray:
         """Calculate the sum of weights, accounting for missing values"""
-        pass
+        weights = self.weights
+        if dim is not None:
+            weights = weights.sel({d: da[d] for d in dim if d in da.dims})
+        
+        return weights.where(da.notnull()).sum(dim=dim)
 
     def _sum_of_squares(self, da: T_DataArray, dim: Dims=None, skipna: bool | None=None) -> T_DataArray:
         """Reduce a DataArray by a weighted ``sum_of_squares`` along some dimension(s)."""
-        pass
+        return self._reduce(da ** 2, self.weights, dim=dim, skipna=skipna)
 
     def _weighted_sum(self, da: T_DataArray, dim: Dims=None, skipna: bool | None=None) -> T_DataArray:
         """Reduce a DataArray by a weighted ``sum`` along some dimension(s)."""
-        pass
+        return self._reduce(da, self.weights, dim=dim, skipna=skipna)
 
     def _weighted_mean(self, da: T_DataArray, dim: Dims=None, skipna: bool | None=None) -> T_DataArray:
         """Reduce a DataArray by a weighted ``mean`` along some dimension(s)."""
-        pass
+        weighted_sum = self._weighted_sum(da, dim=dim, skipna=skipna)
+        sum_of_weights = self._sum_of_weights(da, dim=dim)
+        return weighted_sum / sum_of_weights
 
     def _weighted_var(self, da: T_DataArray, dim: Dims=None, skipna: bool | None=None) -> T_DataArray:
         """Reduce a DataArray by a weighted ``var`` along some dimension(s)."""
-        pass
+        weighted_mean = self._weighted_mean(da, dim=dim, skipna=skipna)
+        dev = (da - weighted_mean) ** 2
+        weighted_sum_of_dev = self._weighted_sum(dev, dim=dim, skipna=skipna)
+        sum_of_weights = self._sum_of_weights(da, dim=dim)
+        return weighted_sum_of_dev / sum_of_weights
 
     def _weighted_std(self, da: T_DataArray, dim: Dims=None, skipna: bool | None=None) -> T_DataArray:
         """Reduce a DataArray by a weighted ``std`` along some dimension(s)."""
-        pass
+        return np.sqrt(self._weighted_var(da, dim=dim, skipna=skipna))
 
     def _weighted_quantile(self, da: T_DataArray, q: ArrayLike, dim: Dims=None, skipna: bool | None=None) -> T_DataArray:
         """Apply a weighted ``quantile`` to a DataArray along some dimension(s)."""
-        pass
+        if dim is None:
+            dim = da.dims
+        
+        if skipna or skipna is None:
+            mask = da.notnull()
+            da = da.where(mask)
+            weights = self.weights.where(mask)
+        else:
+            weights = self.weights
+
+        sorted_idx = da.argsort(dim=dim)
+        sorted_data = da.isel({d: sorted_idx for d in dim})
+        sorted_weights = weights.isel({d: sorted_idx for d in dim})
+
+        cumsum_weights = sorted_weights.cumsum(dim=dim)
+        total_weights = cumsum_weights.isel({d: -1 for d in dim})
+
+        # Normalize cumulative weights
+        cumsum_weights /= total_weights
+
+        # Compute quantiles
+        return sorted_data.interp({d: xr.DataArray(q, dims='quantile') for d in dim}, 
+                                  xi=cumsum_weights, 
+                                  method='linear')
 
     def __repr__(self) -> str:
         """provide a nice str repr of our Weighted object"""
