@@ -35,11 +35,24 @@ def list_chunkmanagers() -> dict[str, ChunkManagerEntrypoint[Any]]:
     -----
     # New selection mechanism introduced with Python 3.10. See GH6514.
     """
-    pass
+    if sys.version_info >= (3, 10):
+        eps = entry_points(group='xarray.chunkmanagers')
+    else:
+        eps = entry_points().get('xarray.chunkmanagers', [])
+    return load_chunkmanagers(eps)
 
 def load_chunkmanagers(entrypoints: Sequence[EntryPoint]) -> dict[str, ChunkManagerEntrypoint[Any]]:
     """Load entrypoints and instantiate chunkmanagers only once."""
-    pass
+    chunkmanagers = {}
+    for entrypoint in entrypoints:
+        try:
+            chunkmanager_cls = entrypoint.load()
+            chunkmanager = chunkmanager_cls()
+            if isinstance(chunkmanager, ChunkManagerEntrypoint):
+                chunkmanagers[entrypoint.name] = chunkmanager
+        except Exception:
+            emit_user_level_warning(f"Failed to load chunkmanager {entrypoint.name}")
+    return chunkmanagers
 
 def guess_chunkmanager(manager: str | ChunkManagerEntrypoint[Any] | None) -> ChunkManagerEntrypoint[Any]:
     """
@@ -48,7 +61,27 @@ def guess_chunkmanager(manager: str | ChunkManagerEntrypoint[Any] | None) -> Chu
     If the name of a specific ChunkManager is given (e.g. "dask"), then use that.
     Else use whatever is installed, defaulting to dask if there are multiple options.
     """
-    pass
+    if isinstance(manager, ChunkManagerEntrypoint):
+        return manager
+
+    chunkmanagers = list_chunkmanagers()
+
+    if manager is None:
+        if "dask" in chunkmanagers:
+            return chunkmanagers["dask"]
+        elif len(chunkmanagers) == 1:
+            return next(iter(chunkmanagers.values()))
+        elif len(chunkmanagers) > 1:
+            raise ValueError(f"Multiple chunkmanagers available: {', '.join(chunkmanagers.keys())}. Please specify one.")
+        else:
+            raise ValueError("No chunkmanagers available.")
+    elif isinstance(manager, str):
+        if manager in chunkmanagers:
+            return chunkmanagers[manager]
+        else:
+            raise ValueError(f"Chunkmanager '{manager}' not found. Available options: {', '.join(chunkmanagers.keys())}")
+    else:
+        raise TypeError(f"Invalid manager type: {type(manager)}")
 
 def get_chunked_array_type(*args: Any) -> ChunkManagerEntrypoint[Any]:
     """
@@ -56,7 +89,22 @@ def get_chunked_array_type(*args: Any) -> ChunkManagerEntrypoint[Any]:
 
     Also checks that all arrays are of same chunking type (i.e. not a mix of cubed and dask).
     """
-    pass
+    chunkmanagers = list_chunkmanagers()
+    detected_managers = set()
+
+    for arg in args:
+        if is_chunked_array(arg):
+            for manager in chunkmanagers.values():
+                if manager.is_chunked_array(arg):
+                    detected_managers.add(manager)
+                    break
+
+    if len(detected_managers) == 0:
+        raise ValueError("No chunked arrays detected.")
+    elif len(detected_managers) > 1:
+        raise ValueError("Mixed chunked array types detected. All arrays must use the same chunking backend.")
+    else:
+        return detected_managers.pop()
 
 class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):
     """
@@ -102,7 +150,7 @@ class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):
         --------
         dask.is_dask_collection
         """
-        pass
+        return isinstance(data, self.array_cls)
 
     @abstractmethod
     def chunks(self, data: T_ChunkedArray) -> _NormalizedChunks:
@@ -126,7 +174,7 @@ class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):
         dask.array.Array.chunks
         cubed.Array.chunks
         """
-        pass
+        raise NotImplementedError("This method must be implemented by subclasses")
 
     @abstractmethod
     def normalize_chunks(self, chunks: _Chunks | _NormalizedChunks, shape: _ShapeType | None=None, limit: int | None=None, dtype: _DType | None=None, previous_chunks: _NormalizedChunks | None=None) -> _NormalizedChunks:
@@ -156,7 +204,7 @@ class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):
         --------
         dask.array.core.normalize_chunks
         """
-        pass
+        raise NotImplementedError("This method must be implemented by subclasses")
 
     @abstractmethod
     def from_array(self, data: duckarray[Any, Any], chunks: _Chunks, **kwargs: Any) -> T_ChunkedArray:
@@ -180,7 +228,7 @@ class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):
         dask.array.from_array
         cubed.from_array
         """
-        pass
+        raise NotImplementedError("This method must be implemented by subclasses")
 
     def rechunk(self, data: T_ChunkedArray, chunks: _NormalizedChunks | tuple[int, ...] | _Chunks, **kwargs: Any) -> Any:
         """
@@ -206,7 +254,7 @@ class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):
         dask.array.Array.rechunk
         cubed.Array.rechunk
         """
-        pass
+        raise NotImplementedError("This method must be implemented by subclasses")
 
     @abstractmethod
     def compute(self, *data: T_ChunkedArray | Any, **kwargs: Any) -> tuple[np.ndarray[Any, _DType_co], ...]:
@@ -232,7 +280,7 @@ class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):
         dask.compute
         cubed.compute
         """
-        pass
+        raise NotImplementedError("This method must be implemented by subclasses")
 
     @property
     def array_api(self) -> Any:
@@ -248,7 +296,7 @@ class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):
         dask.array
         cubed.array_api
         """
-        pass
+        raise NotImplementedError("This property must be implemented by subclasses")
 
     def reduction(self, arr: T_ChunkedArray, func: Callable[..., Any], combine_func: Callable[..., Any] | None=None, aggregate_func: Callable[..., Any] | None=None, axis: int | Sequence[int] | None=None, dtype: _DType_co | None=None, keepdims: bool=False) -> T_ChunkedArray:
         """
@@ -288,7 +336,7 @@ class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):
         dask.array.reduction
         cubed.core.reduction
         """
-        pass
+        raise NotImplementedError("This method must be implemented by subclasses")
 
     def scan(self, func: Callable[..., Any], binop: Callable[..., Any], ident: float, arr: T_ChunkedArray, axis: int | None=None, dtype: _DType_co | None=None, **kwargs: Any) -> T_ChunkedArray:
         """
@@ -316,7 +364,7 @@ class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):
         --------
         dask.array.cumreduction
         """
-        pass
+        raise NotImplementedError("This method must be implemented by subclasses")
 
     @abstractmethod
     def apply_gufunc(self, func: Callable[..., Any], signature: str, *args: Any, axes: Sequence[tuple[int, ...]] | None=None, keepdims: bool=False, output_dtypes: Sequence[_DType_co] | None=None, vectorize: bool | None=None, **kwargs: Any) -> Any:
@@ -393,7 +441,7 @@ class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):
         .. [1] https://docs.scipy.org/doc/numpy/reference/ufuncs.html
         .. [2] https://docs.scipy.org/doc/numpy/reference/c-api/generalized-ufuncs.html
         """
-        pass
+        raise NotImplementedError("This method must be implemented by subclasses")
 
     def map_blocks(self, func: Callable[..., Any], *args: Any, dtype: _DType_co | None=None, chunks: tuple[int, ...] | None=None, drop_axis: int | Sequence[int] | None=None, new_axis: int | Sequence[int] | None=None, **kwargs: Any) -> Any:
         """
@@ -432,7 +480,7 @@ class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):
         dask.array.map_blocks
         cubed.map_blocks
         """
-        pass
+        raise NotImplementedError("This method must be implemented by subclasses")
 
     def blockwise(self, func: Callable[..., Any], out_ind: Iterable[Any], *args: Any, adjust_chunks: dict[Any, Callable[..., Any]] | None=None, new_axes: dict[Any, int] | None=None, align_arrays: bool=True, **kwargs: Any) -> Any:
         """
@@ -474,7 +522,7 @@ class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):
         dask.array.blockwise
         cubed.core.blockwise
         """
-        pass
+        raise NotImplementedError("This method must be implemented by subclasses")
 
     def unify_chunks(self, *args: Any, **kwargs: Any) -> tuple[dict[str, _NormalizedChunks], list[T_ChunkedArray]]:
         """
@@ -492,7 +540,7 @@ class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):
         dask.array.core.unify_chunks
         cubed.core.unify_chunks
         """
-        pass
+        raise NotImplementedError("This method must be implemented by subclasses")
 
     def store(self, sources: T_ChunkedArray | Sequence[T_ChunkedArray], targets: Any, **kwargs: dict[str, Any]) -> Any:
         """
@@ -520,4 +568,4 @@ class ChunkManagerEntrypoint(ABC, Generic[T_ChunkedArray]):
         dask.array.store
         cubed.store
         """
-        pass
+        raise NotImplementedError("This method must be implemented by subclasses")
