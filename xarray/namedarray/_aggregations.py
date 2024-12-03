@@ -52,7 +52,9 @@ class NamedArrayAggregations:
         <xarray.NamedArray ()> Size: 8B
         array(5)
         """
-        pass
+        return self.__array_wrap__(
+            count(self.data, dim=dim, **kwargs)
+        )
 
     def all(self, dim: Dims=None, **kwargs: Any) -> Self:
         """
@@ -98,7 +100,9 @@ class NamedArrayAggregations:
         <xarray.NamedArray ()> Size: 1B
         array(False)
         """
-        pass
+        return self.__array_wrap__(
+            array_all(self.data, axis=dim, **kwargs)
+        )
 
     def any(self, dim: Dims=None, **kwargs: Any) -> Self:
         """
@@ -144,7 +148,9 @@ class NamedArrayAggregations:
         <xarray.NamedArray ()> Size: 1B
         array(True)
         """
-        pass
+        return self.__array_wrap__(
+            array_any(self.data, axis=dim, **kwargs)
+        )
 
     def max(self, dim: Dims=None, *, skipna: bool | None=None, **kwargs: Any) -> Self:
         """
@@ -201,7 +207,9 @@ class NamedArrayAggregations:
         <xarray.NamedArray ()> Size: 8B
         array(nan)
         """
-        pass
+        return self.__array_wrap__(
+            max(self.data, axis=dim, skipna=skipna, **kwargs)
+        )
 
     def min(self, dim: Dims=None, *, skipna: bool | None=None, **kwargs: Any) -> Self:
         """
@@ -258,7 +266,9 @@ class NamedArrayAggregations:
         <xarray.NamedArray ()> Size: 8B
         array(nan)
         """
-        pass
+        return self.__array_wrap__(
+            min(self.data, axis=dim, skipna=skipna, **kwargs)
+        )
 
     def mean(self, dim: Dims=None, *, skipna: bool | None=None, **kwargs: Any) -> Self:
         """
@@ -319,7 +329,9 @@ class NamedArrayAggregations:
         <xarray.NamedArray ()> Size: 8B
         array(nan)
         """
-        pass
+        return self.__array_wrap__(
+            mean(self.data, axis=dim, skipna=skipna, **kwargs)
+        )
 
     def prod(self, dim: Dims=None, *, skipna: bool | None=None, min_count: int | None=None, **kwargs: Any) -> Self:
         """
@@ -392,7 +404,9 @@ class NamedArrayAggregations:
         <xarray.NamedArray ()> Size: 8B
         array(0.)
         """
-        pass
+        return self.__array_wrap__(
+            prod(self.data, axis=dim, skipna=skipna, min_count=min_count, **kwargs)
+        )
 
     def sum(self, dim: Dims=None, *, skipna: bool | None=None, min_count: int | None=None, **kwargs: Any) -> Self:
         """
@@ -465,7 +479,9 @@ class NamedArrayAggregations:
         <xarray.NamedArray ()> Size: 8B
         array(8.)
         """
-        pass
+        return self.__array_wrap__(
+            sum(self.data, axis=dim, skipna=skipna, min_count=min_count, **kwargs)
+        )
 
     def std(self, dim: Dims=None, *, skipna: bool | None=None, ddof: int=0, **kwargs: Any) -> Self:
         """
@@ -666,7 +682,9 @@ class NamedArrayAggregations:
         <xarray.NamedArray ()> Size: 8B
         array(nan)
         """
-        pass
+        return self.__array_wrap__(
+            median(self.data, axis=dim, skipna=skipna, **kwargs)
+        )
 
     def cumsum(self, dim: Dims=None, *, skipna: bool | None=None, **kwargs: Any) -> Self:
         """
