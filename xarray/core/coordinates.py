@@ -35,14 +35,14 @@ class AbstractCoordinates(Mapping[Hashable, 'T_DataArray']):
         --------
         Coordinates.xindexes
         """
-        pass
+        return Indexes({k: v.to_pandas_index() for k, v in self.xindexes.items()})
 
     @property
     def xindexes(self) -> Indexes[Index]:
         """Mapping of :py:class:`~xarray.indexes.Index` objects
         used for label based indexing.
         """
-        pass
+        return self._data.xindexes
 
     def __iter__(self) -> Iterator[Hashable]:
         for k in self.variables:
@@ -74,7 +74,12 @@ class AbstractCoordinates(Mapping[Hashable, 'T_DataArray']):
             coordinates. This will be a MultiIndex if this object is has more
             than more dimension.
         """
-        pass
+        if ordered_dims is None:
+            ordered_dims = list(self.dims)
+        indexes = [self[dim].to_index() for dim in ordered_dims]
+        if len(indexes) == 1:
+            return indexes[0]
+        return pd.MultiIndex.from_product(indexes, names=ordered_dims)
 
 class Coordinates(AbstractCoordinates):
     """Dictionary like container for Xarray coordinates (variables + indexes).
@@ -161,7 +166,7 @@ class Coordinates(AbstractCoordinates):
         from xarray.core.dataset import Dataset
         if coords is None:
             coords = {}
-        variables: dict[Hashable, Variable]
+        variables: dict[Hashable, Variable] = {}
         default_indexes: dict[Hashable, PandasIndex] = {}
         coords_obj_indexes: dict[Hashable, Index] = {}
         if isinstance(coords, Coordinates):
@@ -170,7 +175,6 @@ class Coordinates(AbstractCoordinates):
             variables = {k: v.copy() for k, v in coords.variables.items()}
             coords_obj_indexes = dict(coords.xindexes)
         else:
-            variables = {}
             for name, data in coords.items():
                 var = as_variable(data, name=name, auto_convert=False)
                 if var.dims == (name,) and indexes is None:
