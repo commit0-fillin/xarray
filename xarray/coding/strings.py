@@ -18,26 +18,53 @@ class EncodedStringCoder(VariableCoder):
 
 def ensure_fixed_length_bytes(var: Variable) -> Variable:
     """Ensure that a variable with vlen bytes is converted to fixed width."""
-    pass
+    if var.dtype.kind == 'O':
+        data = var.data
+        if isinstance(data, np.ndarray) and data.dtype == object:
+            max_length = max(len(x) for x in data.flat)
+            new_data = np.zeros(data.shape + (max_length,), dtype='S1')
+            for i, x in np.ndenumerate(data):
+                new_data[i][:len(x)] = x
+            return Variable(var.dims + ('string_length',), new_data, var.attrs, var.encoding)
+    return var
 
 class CharacterArrayCoder(VariableCoder):
     """Transforms between arrays containing bytes and character arrays."""
 
 def bytes_to_char(arr):
     """Convert numpy/dask arrays from fixed width bytes to characters."""
-    pass
+    if arr.dtype.kind == 'S':
+        if isinstance(arr, dask_array_type):
+            return arr.map_overlap(_numpy_bytes_to_char, depth=arr.ndim - 1, boundary='none')
+        else:
+            return _numpy_bytes_to_char(arr)
+    return arr
 
 def _numpy_bytes_to_char(arr):
     """Like netCDF4.stringtochar, but faster and more flexible."""
-    pass
+    if arr.dtype.kind != 'S':
+        return arr
+    
+    shape = arr.shape[:-1] + (-1,)
+    return arr.view('S1').reshape(shape)
 
 def char_to_bytes(arr):
     """Convert numpy/dask arrays from characters to fixed width bytes."""
-    pass
+    if arr.dtype == 'S1' and arr.ndim > 1:
+        if isinstance(arr, dask_array_type):
+            return arr.map_overlap(_numpy_char_to_bytes, depth=arr.ndim - 1, boundary='none')
+        else:
+            return _numpy_char_to_bytes(arr)
+    return arr
 
 def _numpy_char_to_bytes(arr):
     """Like netCDF4.chartostring, but faster and more flexible."""
-    pass
+    if arr.dtype != 'S1':
+        return arr
+    
+    shape = arr.shape[:-1]
+    dtype = 'S' + str(arr.shape[-1])
+    return arr.view(dtype).reshape(shape)
 
 class StackedBytesArray(indexing.ExplicitlyIndexedNDArrayMixin):
     """Wrapper around array-like objects to create a new indexable object where
