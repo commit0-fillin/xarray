@@ -41,7 +41,10 @@ class FileManager:
 
     def close(self, needs_lock=True):
         """Close the file object associated with this manager, if needed."""
-        pass
+        with self._optional_lock(needs_lock):
+            if hasattr(self, '_file_obj'):
+                self._file_obj.close()
+                del self._file_obj
 
 class CachingFileManager(FileManager):
     """Wrapper for automatically opening and closing file objects.
