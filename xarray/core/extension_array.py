@@ -8,8 +8,11 @@ from xarray.core.types import DTypeLikeSave, T_ExtensionArray
 HANDLED_EXTENSION_ARRAY_FUNCTIONS: dict[Callable, Callable] = {}
 
 def implements(numpy_function):
-    """Register an __array_function__ implementation for MyArray objects."""
-    pass
+    """Register an __array_function__ implementation for PandasExtensionArray objects."""
+    def decorator(func):
+        HANDLED_EXTENSION_ARRAY_FUNCTIONS[numpy_function] = func
+        return func
+    return decorator
 
 class PandasExtensionArray(Generic[T_ExtensionArray]):
     array: T_ExtensionArray
