@@ -26,7 +26,9 @@ class FileManager:
 
     def acquire(self, needs_lock=True):
         """Acquire the file object from this manager."""
-        pass
+        with self._optional_lock(needs_lock):
+            file_obj, _ = self._acquire_with_cache_info(needs_lock=False)
+        return file_obj
 
     def acquire_context(self, needs_lock=True):
         """Context manager for acquiring a file. Yields a file object.
@@ -129,12 +131,15 @@ class CachingFileManager(FileManager):
 
     def _make_key(self):
         """Make a key for caching files in the LRU cache."""
-        pass
+        return _HashedSequence((self._opener, self._args, self._mode, tuple(sorted(self._kwargs.items()))))
 
     @contextlib.contextmanager
     def _optional_lock(self, needs_lock):
         """Context manager for optionally acquiring a lock."""
-        pass
+        if needs_lock:
+            return self._lock
+        else:
+            return contextlib.nullcontext()
 
     def acquire(self, needs_lock=True):
         """Acquire a file object from the manager.
@@ -151,20 +156,42 @@ class CachingFileManager(FileManager):
         file-like
             An open file object, as returned by ``opener(*args, **kwargs)``.
         """
-        pass
+        with self._optional_lock(needs_lock):
+            file_obj, _ = self._acquire_with_cache_info(needs_lock=False)
+        return file_obj
 
     @contextlib.contextmanager
     def acquire_context(self, needs_lock=True):
         """Context manager for acquiring a file."""
-        pass
+        file_obj = None
+        try:
+            file_obj = self.acquire(needs_lock)
+            yield file_obj
+        finally:
+            if file_obj is not None:
+                self.close(needs_lock)
 
     def _acquire_with_cache_info(self, needs_lock=True):
         """Acquire a file, returning the file and whether it was cached."""
-        pass
+        with self._optional_lock(needs_lock):
+            if self._key in self._cache:
+                return self._cache[self._key], True
+            else:
+                kwargs = self._kwargs.copy()
+                if self._mode is not _DEFAULT_MODE:
+                    kwargs['mode'] = self._mode
+                file_obj = self._opener(*self._args, **kwargs)
+                self._cache[self._key] = file_obj
+                if self._mode == 'w':
+                    self._mode = 'a'
+                return file_obj, False
 
     def close(self, needs_lock=True):
         """Explicitly close any associated file object (if necessary)."""
-        pass
+        with self._optional_lock(needs_lock):
+            if self._key in self._cache:
+                file_obj = self._cache.pop(self._key)
+                file_obj.close()
 
     def __del__(self) -> None:
         ref_count = self._ref_counter.decrement(self._key)
