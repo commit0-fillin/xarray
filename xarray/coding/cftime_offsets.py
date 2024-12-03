@@ -23,7 +23,24 @@ DayOption: TypeAlias = Literal['start', 'end']
 
 def get_date_type(calendar, use_cftime=True):
     """Return the cftime date type for a given calendar name."""
-    pass
+    if cftime is None:
+        raise ModuleNotFoundError("No module named 'cftime'")
+    
+    calendar = calendar.lower()
+    if calendar in {'standard', 'gregorian'}:
+        return cftime.DatetimeGregorian if use_cftime else datetime
+    elif calendar == 'proleptic_gregorian':
+        return cftime.DatetimeProlepticGregorian
+    elif calendar in {'noleap', '365_day'}:
+        return cftime.DatetimeNoLeap
+    elif calendar in {'all_leap', '366_day'}:
+        return cftime.DatetimeAllLeap
+    elif calendar == '360_day':
+        return cftime.Datetime360Day
+    elif calendar == 'julian':
+        return cftime.DatetimeJulian
+    else:
+        raise ValueError(f"Unsupported calendar: {calendar}")
 
 class BaseCFTimeOffset:
     _freq: ClassVar[str | None] = None
@@ -81,7 +98,10 @@ class BaseCFTimeOffset:
     def onOffset(self, date) -> bool:
         """Check if the given date is in the set of possible dates created
         using a length-one version of this offset class."""
-        pass
+        if self.n == 1:
+            return date == self.__apply__(self.__apply__(date) - timedelta(microseconds=1))
+        else:
+            return False
 
     def __str__(self):
         return f'<{type(self).__name__}: n={self.n}>'
@@ -104,7 +124,7 @@ class Tick(BaseCFTimeOffset):
 
     def as_timedelta(self) -> timedelta:
         """All Tick subclasses must implement an as_timedelta method."""
-        pass
+        raise NotImplementedError("Subclasses must implement this method")
 
 def _get_day_of_month(other, day_option: DayOption) -> int:
     """Find the day in `other`'s month that satisfies a BaseCFTimeOffset's
@@ -122,26 +142,58 @@ def _get_day_of_month(other, day_option: DayOption) -> int:
     day_of_month : int
 
     """
-    pass
+    if day_option == 'start':
+        return 1
+    elif day_option == 'end':
+        return _days_in_month(other)
+    else:
+        raise ValueError(f"Invalid day_option: {day_option}")
 
 def _days_in_month(date):
     """The number of days in the month of the given date"""
-    pass
+    if isinstance(date, datetime):
+        return (date.replace(day=1) + timedelta(days=32)).replace(day=1).day - 1
+    else:
+        # For cftime.datetime objects
+        year = date.year
+        month = date.month
+        if month == 12:
+            next_month = date.replace(year=year + 1, month=1, day=1)
+        else:
+            next_month = date.replace(month=month + 1, day=1)
+        return (next_month - date.replace(day=1)).days
 
 def _adjust_n_months(other_day, n, reference_day):
     """Adjust the number of times a monthly offset is applied based
     on the day of a given date, and the reference day provided.
     """
-    pass
+    if n > 0 and other_day < reference_day:
+        return n - 1
+    elif n <= 0 and other_day > reference_day:
+        return n + 1
+    return n
 
 def _adjust_n_years(other, n, month, reference_day):
     """Adjust the number of times an annual offset is applied based on
     another date, and the reference day provided"""
-    pass
+    if n > 0:
+        if other.month < month or (other.month == month and other.day < reference_day):
+            return n - 1
+    elif n < 0:
+        if other.month > month or (other.month == month and other.day > reference_day):
+            return n + 1
+    return n
 
 def _shift_month(date, months, day_option: DayOption='start'):
     """Shift the date to a month start or end a given number of months away."""
-    pass
+    year = date.year + (date.month + months - 1) // 12
+    month = (date.month + months - 1) % 12 + 1
+    if day_option == 'start':
+        return date.replace(year=year, month=month, day=1)
+    elif day_option == 'end':
+        return date.replace(year=year, month=month, day=_days_in_month(date.replace(year=year, month=month)))
+    else:
+        raise ValueError(f"Invalid day_option: {day_option}")
 
 def roll_qtrday(other, n: int, month: int, day_option: DayOption, modby: int=3) -> int:
     """Possibly increment or decrement the number of periods to shift
@@ -165,7 +217,19 @@ def roll_qtrday(other, n: int, month: int, day_option: DayOption, modby: int=3) 
     --------
     _get_day_of_month : Find the day in a month provided an offset.
     """
-    pass
+    months_since = other.month % modby - month % modby
+    if n > 0 and months_since < 0:
+        n -= 1
+    elif n <= 0 and months_since > 0:
+        n += 1
+    
+    reference_day = _get_day_of_month(other, day_option)
+    if n > 0 and other.day < reference_day:
+        n -= 1
+    elif n <= 0 and other.day > reference_day:
+        n += 1
+    
+    return n
 
 class MonthBegin(BaseCFTimeOffset):
     _freq = 'MS'
@@ -177,7 +241,7 @@ class MonthBegin(BaseCFTimeOffset):
     def onOffset(self, date) -> bool:
         """Check if the given date is in the set of possible dates created
         using a length-one version of this offset class."""
-        pass
+        return date.day == 1
 
 class MonthEnd(BaseCFTimeOffset):
     _freq = 'ME'
@@ -189,7 +253,7 @@ class MonthEnd(BaseCFTimeOffset):
     def onOffset(self, date) -> bool:
         """Check if the given date is in the set of possible dates created
         using a length-one version of this offset class."""
-        pass
+        return date.day == _days_in_month(date)
 _MONTH_ABBREVIATIONS = {1: 'JAN', 2: 'FEB', 3: 'MAR', 4: 'APR', 5: 'MAY', 6: 'JUN', 7: 'JUL', 8: 'AUG', 9: 'SEP', 10: 'OCT', 11: 'NOV', 12: 'DEC'}
 
 class QuarterOffset(BaseCFTimeOffset):
@@ -210,7 +274,12 @@ class QuarterOffset(BaseCFTimeOffset):
     def onOffset(self, date) -> bool:
         """Check if the given date is in the set of possible dates created
         using a length-one version of this offset class."""
-        pass
+        if self._day_option == 'start':
+            return (date.month % 3 == self.month % 3) and date.day == 1
+        elif self._day_option == 'end':
+            return (date.month % 3 == self.month % 3) and date.day == _days_in_month(date)
+        else:
+            return False
 
     def __sub__(self, other: Self) -> Self:
         if cftime is None:
@@ -236,11 +305,17 @@ class QuarterBegin(QuarterOffset):
 
     def rollforward(self, date):
         """Roll date forward to nearest start of quarter"""
-        pass
+        if self.onOffset(date):
+            return date
+        months_to_next = 3 - ((date.month - self.month) % 3)
+        return _shift_month(date, months_to_next, 'start')
 
     def rollback(self, date):
         """Roll date backward to nearest start of quarter"""
-        pass
+        if self.onOffset(date):
+            return date
+        months_to_prev = ((date.month - self.month) % 3)
+        return _shift_month(date, -months_to_prev, 'start')
 
 class QuarterEnd(QuarterOffset):
     _default_month = 3
@@ -249,11 +324,17 @@ class QuarterEnd(QuarterOffset):
 
     def rollforward(self, date):
         """Roll date forward to nearest end of quarter"""
-        pass
+        if self.onOffset(date):
+            return date
+        months_to_next = 3 - ((date.month - self.month) % 3)
+        return _shift_month(date, months_to_next, 'end')
 
     def rollback(self, date):
         """Roll date backward to nearest end of quarter"""
-        pass
+        if self.onOffset(date):
+            return date
+        months_to_prev = ((date.month - self.month) % 3) or 3
+        return _shift_month(date, -months_to_prev, 'end')
 
 class YearOffset(BaseCFTimeOffset):
     _default_month: ClassVar[int]
@@ -295,15 +376,23 @@ class YearBegin(YearOffset):
     def onOffset(self, date) -> bool:
         """Check if the given date is in the set of possible dates created
         using a length-one version of this offset class."""
-        pass
+        return date.month == self.month and date.day == 1
 
     def rollforward(self, date):
         """Roll date forward to nearest start of year"""
-        pass
+        if self.onOffset(date):
+            return date
+        if date.month < self.month or (date.month == self.month and date.day > 1):
+            return date.replace(year=date.year + 1, month=self.month, day=1)
+        return date.replace(month=self.month, day=1)
 
     def rollback(self, date):
         """Roll date backward to nearest start of year"""
-        pass
+        if self.onOffset(date):
+            return date
+        if date.month > self.month or (date.month == self.month and date.day > 1):
+            return date.replace(month=self.month, day=1)
+        return date.replace(year=date.year - 1, month=self.month, day=1)
 
 class YearEnd(YearOffset):
     _freq = 'YE'
@@ -313,15 +402,23 @@ class YearEnd(YearOffset):
     def onOffset(self, date) -> bool:
         """Check if the given date is in the set of possible dates created
         using a length-one version of this offset class."""
-        pass
+        return date.month == self.month and date.day == _days_in_month(date)
 
     def rollforward(self, date):
         """Roll date forward to nearest end of year"""
-        pass
+        if self.onOffset(date):
+            return date
+        if date.month > self.month or (date.month == self.month and date.day == _days_in_month(date)):
+            return date.replace(year=date.year + 1, month=self.month, day=_days_in_month(date.replace(year=date.year + 1, month=self.month)))
+        return date.replace(month=self.month, day=_days_in_month(date.replace(month=self.month)))
 
     def rollback(self, date):
         """Roll date backward to nearest end of year"""
-        pass
+        if self.onOffset(date):
+            return date
+        if date.month < self.month or (date.month == self.month and date.day < _days_in_month(date)):
+            return date.replace(year=date.year - 1, month=self.month, day=_days_in_month(date.replace(year=date.year - 1, month=self.month)))
+        return date.replace(month=self.month, day=_days_in_month(date.replace(month=self.month)))
 
 class Day(Tick):
     _freq = 'D'
@@ -368,20 +465,61 @@ _DEPRECATION_MESSAGE = '{deprecated_freq!r} is deprecated and will be removed in
 def to_offset(freq: BaseCFTimeOffset | str, warn: bool=True) -> BaseCFTimeOffset:
     """Convert a frequency string to the appropriate subclass of
     BaseCFTimeOffset."""
-    pass
+    if isinstance(freq, BaseCFTimeOffset):
+        return freq
+
+    if not isinstance(freq, str):
+        raise TypeError(f"freq must be a string or BaseCFTimeOffset, not {type(freq)}")
+
+    pattern = re.compile(_PATTERN)
+    m = pattern.match(freq)
+
+    if m is None:
+        raise ValueError(f"Invalid frequency: {freq}")
+
+    groups = m.groupdict()
+
+    n = int(groups['multiple'] or 1)
+    offset_name = groups['freq']
+
+    if offset_name in _DEPRECATED_FREQUENICES and warn:
+        recommended_freq = _DEPRECATED_FREQUENICES[offset_name]
+        emit_user_level_warning(_DEPRECATION_MESSAGE.format(deprecated_freq=offset_name, recommended_freq=recommended_freq), FutureWarning)
+
+    if offset_name in _FREQUENCIES:
+        offset = _FREQUENCIES[offset_name]
+        if isinstance(offset, partial):
+            return offset(n=n)
+        else:
+            return offset(n=n)
+    else:
+        raise ValueError(f"Invalid frequency: {freq}")
 
 def normalize_date(date):
     """Round datetime down to midnight."""
-    pass
+    if isinstance(date, datetime):
+        return date.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif cftime and isinstance(date, cftime.datetime):
+        return date.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        raise TypeError(f"Unsupported date type: {type(date)}")
 
 def _maybe_normalize_date(date, normalize):
     """Round datetime down to midnight if normalize is True."""
-    pass
+    return normalize_date(date) if normalize else date
 
 def _generate_linear_range(start, end, periods):
     """Generate an equally-spaced sequence of cftime.datetime objects between
     and including two dates (whose length equals the number of periods)."""
-    pass
+    if periods == 1:
+        return [start]
+    
+    delta = (end - start) / (periods - 1)
+    
+    dates = [start + i * delta for i in range(periods)]
+    dates[-1] = end  # Ensure the last date is exactly the end date
+    
+    return dates
 
 def _generate_range(start, end, periods, offset):
     """Generate a regular range of cftime.datetime objects with a
@@ -405,280 +543,172 @@ def _generate_range(start, end, periods, offset):
     -------
     A generator object
     """
-    pass
+    if start is None and end is None:
+        raise ValueError("At least one of start and end must be specified")
+    
+    if start is not None and end is not None and periods is not None:
+        raise ValueError("Either specify periods or start and end, but not all three")
+    
+    if periods is not None and periods < 1:
+        raise ValueError("Periods must be a positive integer")
+    
+    if start is None:
+        start = end - (periods - 1) * offset
+    elif end is None:
+        end = start + (periods - 1) * offset
+    
+    current = start
+    if offset.n >= 0:
+        while current <= end:
+            yield current
+            current = offset.__apply__(current)
+    else:
+        while current >= end:
+            yield current
+            current = offset.__apply__(current)
 
 def _translate_closed_to_inclusive(closed):
     """Follows code added in pandas #43504."""
-    pass
+    if closed is None:
+        return None
+    if closed == "left":
+        return "both"
+    if closed == "right":
+        return "both"
+    raise ValueError(f"Closed must be None, 'left' or 'right', got {closed}")
 
 def _infer_inclusive(closed: NoDefault | SideOptions, inclusive: InclusiveOptions | None) -> InclusiveOptions:
     """Follows code added in pandas #43504."""
-    pass
+    if inclusive is not None:
+        return inclusive
+    if closed is no_default:
+        return "both"
+    return _translate_closed_to_inclusive(closed)
 
 def cftime_range(start=None, end=None, periods=None, freq=None, normalize=False, name=None, closed: NoDefault | SideOptions=no_default, inclusive: None | InclusiveOptions=None, calendar='standard') -> CFTimeIndex:
-    """Return a fixed frequency CFTimeIndex.
+    """Return a fixed frequency CFTimeIndex."""
+    calendar = calendar.lower()
+    date_type = get_date_type(calendar)
 
-    Parameters
-    ----------
-    start : str or cftime.datetime, optional
-        Left bound for generating dates.
-    end : str or cftime.datetime, optional
-        Right bound for generating dates.
-    periods : int, optional
-        Number of periods to generate.
-    freq : str or None, default: "D"
-        Frequency strings can have multiples, e.g. "5h" and negative values, e.g. "-1D".
-    normalize : bool, default: False
-        Normalize start/end dates to midnight before generating date range.
-    name : str, default: None
-        Name of the resulting index
-    closed : {None, "left", "right"}, default: "NO_DEFAULT"
-        Make the interval closed with respect to the given frequency to the
-        "left", "right", or both sides (None).
+    if start is not None:
+        start = _parse_iso8601_with_reso(start, date_type)
+    if end is not None:
+        end = _parse_iso8601_with_reso(end, date_type)
 
-        .. deprecated:: 2023.02.0
-            Following pandas, the ``closed`` parameter is deprecated in favor
-            of the ``inclusive`` parameter, and will be removed in a future
-            version of xarray.
+    if start is not None and end is not None and start > end:
+        raise ValueError("Start date must be before end date.")
 
-    inclusive : {None, "both", "neither", "left", "right"}, default None
-        Include boundaries; whether to set each bound as closed or open.
+    if freq is None:
+        freq = 'D'
 
-        .. versionadded:: 2023.02.0
+    offset = to_offset(freq)
 
-    calendar : str, default: "standard"
-        Calendar type for the datetimes.
+    if normalize:
+        start = normalize_date(start) if start is not None else None
+        end = normalize_date(end) if end is not None else None
 
-    Returns
-    -------
-    CFTimeIndex
+    if start is None and end is None:
+        if periods is None:
+            raise ValueError("Must specify start, end, or periods")
+        raise ValueError("Must specify start or end when periods is specified")
 
-    Notes
-    -----
-    This function is an analog of ``pandas.date_range`` for use in generating
-    sequences of ``cftime.datetime`` objects.  It supports most of the
-    features of ``pandas.date_range`` (e.g. specifying how the index is
-    ``closed`` on either side, or whether or not to ``normalize`` the start and
-    end bounds); however, there are some notable exceptions:
+    inclusive = _infer_inclusive(closed, inclusive)
 
-    - You cannot specify a ``tz`` (time zone) argument.
-    - Start or end dates specified as partial-datetime strings must use the
-      `ISO-8601 format <https://en.wikipedia.org/wiki/ISO_8601>`_.
-    - It supports many, but not all, frequencies supported by
-      ``pandas.date_range``.  For example it does not currently support any of
-      the business-related or semi-monthly frequencies.
-    - Compound sub-monthly frequencies are not supported, e.g. '1H1min', as
-      these can easily be written in terms of the finest common resolution,
-      e.g. '61min'.
+    if inclusive is None:
+        inclusive = "both"
 
-    Valid simple frequency strings for use with ``cftime``-calendars include
-    any multiples of the following.
+    if start is None and periods is None:
+        periods = 1
+    elif end is None and periods is None:
+        periods = 1
+    elif periods is None:
+        periods = len(list(_generate_range(start, end, periods, offset)))
 
-    +--------+--------------------------+
-    | Alias  | Description              |
-    +========+==========================+
-    | YE     | Year-end frequency       |
-    +--------+--------------------------+
-    | YS     | Year-start frequency     |
-    +--------+--------------------------+
-    | QE     | Quarter-end frequency    |
-    +--------+--------------------------+
-    | QS     | Quarter-start frequency  |
-    +--------+--------------------------+
-    | ME     | Month-end frequency      |
-    +--------+--------------------------+
-    | MS     | Month-start frequency    |
-    +--------+--------------------------+
-    | D      | Day frequency            |
-    +--------+--------------------------+
-    | h      | Hour frequency           |
-    +--------+--------------------------+
-    | min    | Minute frequency         |
-    +--------+--------------------------+
-    | s      | Second frequency         |
-    +--------+--------------------------+
-    | ms     | Millisecond frequency    |
-    +--------+--------------------------+
-    | us     | Microsecond frequency    |
-    +--------+--------------------------+
+    if inclusive == "left":
+        if end is not None:
+            end = end - offset
+    elif inclusive == "right":
+        if start is not None:
+            start = start + offset
+    elif inclusive == "neither":
+        if start is not None:
+            start = start + offset
+        if end is not None:
+            end = end - offset
 
-    Any multiples of the following anchored offsets are also supported.
+    dates = list(_generate_range(start, end, periods, offset))
 
-    +------------+--------------------------------------------------------------------+
-    | Alias      | Description                                                        |
-    +============+====================================================================+
-    | Y(E,S)-JAN | Annual frequency, anchored at the (end, beginning) of January      |
-    +------------+--------------------------------------------------------------------+
-    | Y(E,S)-FEB | Annual frequency, anchored at the (end, beginning) of February     |
-    +------------+--------------------------------------------------------------------+
-    | Y(E,S)-MAR | Annual frequency, anchored at the (end, beginning) of March        |
-    +------------+--------------------------------------------------------------------+
-    | Y(E,S)-APR | Annual frequency, anchored at the (end, beginning) of April        |
-    +------------+--------------------------------------------------------------------+
-    | Y(E,S)-MAY | Annual frequency, anchored at the (end, beginning) of May          |
-    +------------+--------------------------------------------------------------------+
-    | Y(E,S)-JUN | Annual frequency, anchored at the (end, beginning) of June         |
-    +------------+--------------------------------------------------------------------+
-    | Y(E,S)-JUL | Annual frequency, anchored at the (end, beginning) of July         |
-    +------------+--------------------------------------------------------------------+
-    | Y(E,S)-AUG | Annual frequency, anchored at the (end, beginning) of August       |
-    +------------+--------------------------------------------------------------------+
-    | Y(E,S)-SEP | Annual frequency, anchored at the (end, beginning) of September    |
-    +------------+--------------------------------------------------------------------+
-    | Y(E,S)-OCT | Annual frequency, anchored at the (end, beginning) of October      |
-    +------------+--------------------------------------------------------------------+
-    | Y(E,S)-NOV | Annual frequency, anchored at the (end, beginning) of November     |
-    +------------+--------------------------------------------------------------------+
-    | Y(E,S)-DEC | Annual frequency, anchored at the (end, beginning) of December     |
-    +------------+--------------------------------------------------------------------+
-    | Q(E,S)-JAN | Quarter frequency, anchored at the (end, beginning) of January     |
-    +------------+--------------------------------------------------------------------+
-    | Q(E,S)-FEB | Quarter frequency, anchored at the (end, beginning) of February    |
-    +------------+--------------------------------------------------------------------+
-    | Q(E,S)-MAR | Quarter frequency, anchored at the (end, beginning) of March       |
-    +------------+--------------------------------------------------------------------+
-    | Q(E,S)-APR | Quarter frequency, anchored at the (end, beginning) of April       |
-    +------------+--------------------------------------------------------------------+
-    | Q(E,S)-MAY | Quarter frequency, anchored at the (end, beginning) of May         |
-    +------------+--------------------------------------------------------------------+
-    | Q(E,S)-JUN | Quarter frequency, anchored at the (end, beginning) of June        |
-    +------------+--------------------------------------------------------------------+
-    | Q(E,S)-JUL | Quarter frequency, anchored at the (end, beginning) of July        |
-    +------------+--------------------------------------------------------------------+
-    | Q(E,S)-AUG | Quarter frequency, anchored at the (end, beginning) of August      |
-    +------------+--------------------------------------------------------------------+
-    | Q(E,S)-SEP | Quarter frequency, anchored at the (end, beginning) of September   |
-    +------------+--------------------------------------------------------------------+
-    | Q(E,S)-OCT | Quarter frequency, anchored at the (end, beginning) of October     |
-    +------------+--------------------------------------------------------------------+
-    | Q(E,S)-NOV | Quarter frequency, anchored at the (end, beginning) of November    |
-    +------------+--------------------------------------------------------------------+
-    | Q(E,S)-DEC | Quarter frequency, anchored at the (end, beginning) of December    |
-    +------------+--------------------------------------------------------------------+
-
-    Finally, the following calendar aliases are supported.
-
-    +--------------------------------+---------------------------------------+
-    | Alias                          | Date type                             |
-    +================================+=======================================+
-    | standard, gregorian            | ``cftime.DatetimeGregorian``          |
-    +--------------------------------+---------------------------------------+
-    | proleptic_gregorian            | ``cftime.DatetimeProlepticGregorian`` |
-    +--------------------------------+---------------------------------------+
-    | noleap, 365_day                | ``cftime.DatetimeNoLeap``             |
-    +--------------------------------+---------------------------------------+
-    | all_leap, 366_day              | ``cftime.DatetimeAllLeap``            |
-    +--------------------------------+---------------------------------------+
-    | 360_day                        | ``cftime.Datetime360Day``             |
-    +--------------------------------+---------------------------------------+
-    | julian                         | ``cftime.DatetimeJulian``             |
-    +--------------------------------+---------------------------------------+
-
-    Examples
-    --------
-    This function returns a ``CFTimeIndex``, populated with ``cftime.datetime``
-    objects associated with the specified calendar type, e.g.
-
-    >>> xr.cftime_range(start="2000", periods=6, freq="2MS", calendar="noleap")
-    CFTimeIndex([2000-01-01 00:00:00, 2000-03-01 00:00:00, 2000-05-01 00:00:00,
-                 2000-07-01 00:00:00, 2000-09-01 00:00:00, 2000-11-01 00:00:00],
-                dtype='object', length=6, calendar='noleap', freq='2MS')
-
-    As in the standard pandas function, three of the ``start``, ``end``,
-    ``periods``, or ``freq`` arguments must be specified at a given time, with
-    the other set to ``None``.  See the `pandas documentation
-    <https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.date_range.html>`_
-    for more examples of the behavior of ``date_range`` with each of the
-    parameters.
-
-    See Also
-    --------
-    pandas.date_range
-    """
-    pass
+    return CFTimeIndex(dates, name=name)
 
 def date_range(start=None, end=None, periods=None, freq=None, tz=None, normalize=False, name=None, closed: NoDefault | SideOptions=no_default, inclusive: None | InclusiveOptions=None, calendar='standard', use_cftime=None):
-    """Return a fixed frequency datetime index.
+    """Return a fixed frequency datetime index."""
+    calendar = calendar.lower()
 
-    The type (:py:class:`xarray.CFTimeIndex` or :py:class:`pandas.DatetimeIndex`)
-    of the returned index depends on the requested calendar and on `use_cftime`.
+    if use_cftime is None:
+        use_cftime = not _is_standard_calendar(calendar)
 
-    Parameters
-    ----------
-    start : str or datetime-like, optional
-        Left bound for generating dates.
-    end : str or datetime-like, optional
-        Right bound for generating dates.
-    periods : int, optional
-        Number of periods to generate.
-    freq : str or None, default: "D"
-        Frequency strings can have multiples, e.g. "5h" and negative values, e.g. "-1D".
-    tz : str or tzinfo, optional
-        Time zone name for returning localized DatetimeIndex, for example
-        'Asia/Hong_Kong'. By default, the resulting DatetimeIndex is
-        timezone-naive. Only valid with pandas DatetimeIndex.
-    normalize : bool, default: False
-        Normalize start/end dates to midnight before generating date range.
-    name : str, default: None
-        Name of the resulting index
-    closed : {None, "left", "right"}, default: "NO_DEFAULT"
-        Make the interval closed with respect to the given frequency to the
-        "left", "right", or both sides (None).
+    if tz is not None:
+        use_cftime = False
 
-        .. deprecated:: 2023.02.0
-            Following pandas, the `closed` parameter is deprecated in favor
-            of the `inclusive` parameter, and will be removed in a future
-            version of xarray.
+    if use_cftime:
+        return cftime_range(
+            start=start,
+            end=end,
+            periods=periods,
+            freq=freq,
+            normalize=normalize,
+            name=name,
+            closed=closed,
+            inclusive=inclusive,
+            calendar=calendar,
+        )
 
-    inclusive : {None, "both", "neither", "left", "right"}, default: None
-        Include boundaries; whether to set each bound as closed or open.
+    if not _is_standard_calendar(calendar):
+        raise ValueError(
+            f"Calendar '{calendar}' is not supported by pandas. "
+            "Set use_cftime=True to use cftime.datetime objects instead."
+        )
 
-        .. versionadded:: 2023.02.0
-
-    calendar : str, default: "standard"
-        Calendar type for the datetimes.
-    use_cftime : boolean, optional
-        If True, always return a CFTimeIndex.
-        If False, return a pd.DatetimeIndex if possible or raise a ValueError.
-        If None (default), return a pd.DatetimeIndex if possible,
-        otherwise return a CFTimeIndex. Defaults to False if `tz` is not None.
-
-    Returns
-    -------
-    CFTimeIndex or pd.DatetimeIndex
-
-    See also
-    --------
-    pandas.date_range
-    cftime_range
-    date_range_like
-    """
-    pass
+    return pd.date_range(
+        start=start,
+        end=end,
+        periods=periods,
+        freq=freq,
+        tz=tz,
+        normalize=normalize,
+        name=name,
+        inclusive=_infer_inclusive(closed, inclusive),
+    )
 
 def date_range_like(source, calendar, use_cftime=None):
     """Generate a datetime array with the same frequency, start and end as
-    another one, but in a different calendar.
+    another one, but in a different calendar."""
+    if isinstance(source, pd.DatetimeIndex):
+        start = source[0].to_pydatetime()
+        end = source[-1].to_pydatetime()
+        periods = len(source)
+        freq = source.freq
+    elif isinstance(source, CFTimeIndex):
+        start = source[0]
+        end = source[-1]
+        periods = len(source)
+        freq = source.freq
+    elif isinstance(source, xr.DataArray):
+        if not _contains_datetime_like_objects(source):
+            raise ValueError("Source must contain datetime-like values")
+        start = source.values[0]
+        end = source.values[-1]
+        periods = len(source)
+        freq = source.attrs.get('freq', infer_freq(source))
+    else:
+        raise TypeError("Source must be a DataArray, CFTimeIndex, or pd.DatetimeIndex")
 
-    Parameters
-    ----------
-    source : DataArray, CFTimeIndex, or pd.DatetimeIndex
-        1D datetime array
-    calendar : str
-        New calendar name.
-    use_cftime : bool, optional
-        If True, the output uses :py:class:`cftime.datetime` objects.
-        If None (default), :py:class:`numpy.datetime64` values are used if possible.
-        If False, :py:class:`numpy.datetime64` values are used or an error is raised.
+    if use_cftime is None:
+        use_cftime = not _is_standard_calendar(calendar)
 
-    Returns
-    -------
-    DataArray
-        1D datetime coordinate with the same start, end and frequency as the
-        source, but in the new calendar. The start date is assumed to exist in
-        the target calendar. If the end date doesn't exist, the code tries 1
-        and 2 calendar days before. There is a special case when the source time
-        series is daily or coarser and the end of the input range is on the
-        last day of the month. Then the output range will also end on the last
-        day of the month in the new calendar.
-    """
-    pass
+    if use_cftime:
+        return cftime_range(start=start, end=end, periods=periods, freq=freq, calendar=calendar)
+    else:
+        if not _is_standard_calendar(calendar):
+            raise ValueError(f"Calendar '{calendar}' is not supported by pandas. Set use_cftime=True to use cftime.datetime objects instead.")
+        return pd.date_range(start=start, end=end, periods=periods, freq=freq)
