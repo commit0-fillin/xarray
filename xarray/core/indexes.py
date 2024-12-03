@@ -62,7 +62,7 @@ class Index:
         index : Index
             A new Index object.
         """
-        pass
+        raise NotImplementedError("This method must be implemented by subclasses")
 
     @classmethod
     def concat(cls, indexes: Sequence[Self], dim: Hashable, positions: Iterable[Iterable[int]] | None=None) -> Self:
@@ -90,7 +90,7 @@ class Index:
         index : Index
             A new Index object.
         """
-        pass
+        raise NotImplementedError("Concatenation is not supported for this index type")
 
     @classmethod
     def stack(cls, variables: Mapping[Any, Variable], dim: Hashable) -> Self:
@@ -113,7 +113,7 @@ class Index:
         index
             A new Index object.
         """
-        pass
+        raise NotImplementedError("Stacking is not supported for this index type")
 
     def unstack(self) -> tuple[dict[Hashable, Index], pd.MultiIndex]:
         """Unstack a (multi-)index into multiple (single) indexes.
@@ -129,7 +129,7 @@ class Index:
             object used to unstack unindexed coordinate variables or data
             variables.
         """
-        pass
+        raise NotImplementedError("Unstacking is not supported for this index type")
 
     def create_variables(self, variables: Mapping[Any, Variable] | None=None) -> IndexVars:
         """Maybe create new coordinate variables from this index.
@@ -156,7 +156,9 @@ class Index:
             Dictionary of :py:class:`Variable` or :py:class:`IndexVariable`
             objects.
         """
-        pass
+        if variables is None:
+            return {}
+        return dict(variables)
 
     def to_pandas_index(self) -> pd.Index:
         """Cast this xarray index to a pandas.Index object or raise a
@@ -168,7 +170,7 @@ class Index:
         By default it raises a ``TypeError``, unless it is re-implemented in
         subclasses of Index.
         """
-        pass
+        raise TypeError(f"Cannot convert {type(self).__name__} to pandas.Index")
 
     def isel(self, indexers: Mapping[Any, int | slice | np.ndarray | Variable]) -> Self | None:
         """Maybe returns a new index from the current index itself indexed by
@@ -197,7 +199,7 @@ class Index:
         maybe_index : Index
             A new Index object or ``None``.
         """
-        pass
+        return None
 
     def sel(self, labels: dict[Any, Any]) -> IndexSelResult:
         """Query the index with arbitrary coordinate label indexers.
@@ -223,7 +225,7 @@ class Index:
             An index query result object that contains dimension positional indexers.
             It may also contain new indexes, coordinate variables, etc.
         """
-        pass
+        raise NotImplementedError("Label-based selection is not supported for this index type")
 
     def join(self, other: Self, how: JoinOptions='inner') -> Self:
         """Return a new index from the combination of this index with another
@@ -243,7 +245,7 @@ class Index:
         joined : Index
             A new Index object.
         """
-        pass
+        raise NotImplementedError("Joining is not supported for this index type")
 
     def reindex_like(self, other: Self) -> dict[Hashable, Any]:
         """Query the index with another index of the same type.
@@ -261,7 +263,7 @@ class Index:
             A dictionary where keys are dimension names and values are positional
             indexers.
         """
-        pass
+        raise NotImplementedError("Reindexing is not supported for this index type")
 
     def equals(self, other: Self) -> bool:
         """Compare this index with another index of the same type.
@@ -278,7 +280,7 @@ class Index:
         is_equal : bool
             ``True`` if the indexes are equal, ``False`` otherwise.
         """
-        pass
+        return self is other
 
     def roll(self, shifts: Mapping[Any, int]) -> Self | None:
         """Roll this index by an offset along one or more dimensions.
@@ -303,7 +305,7 @@ class Index:
         rolled : Index
             A new index with rolled data.
         """
-        pass
+        return None
 
     def rename(self, name_dict: Mapping[Any, Hashable], dims_dict: Mapping[Any, Hashable]) -> Self:
         """Maybe update the index with new coordinate and dimension names.
@@ -330,7 +332,7 @@ class Index:
         renamed : Index
             Index with renamed attributes.
         """
-        pass
+        return self
 
     def copy(self, deep: bool=True) -> Self:
         """Return a (deep) copy of this index.
@@ -349,7 +351,7 @@ class Index:
         index : Index
             A new Index object.
         """
-        pass
+        return copy.deepcopy(self) if deep else copy.copy(self)
 
     def __copy__(self) -> Self:
         return self.copy(deep=False)
