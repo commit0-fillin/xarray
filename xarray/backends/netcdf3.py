@@ -24,7 +24,15 @@ def coerce_nc3_dtype(arr):
     Data is checked for equality, or equivalence (non-NaN values) using the
     ``(cast_array == original_array).all()``.
     """
-    pass
+    dtype = arr.dtype
+    if dtype.name in _nc3_dtype_coercions:
+        new_dtype = _nc3_dtype_coercions[dtype.name]
+        cast_arr = arr.astype(new_dtype)
+        if np.array_equal(cast_arr, arr) or (np.isnan(cast_arr) == np.isnan(arr)).all():
+            return cast_arr
+        else:
+            raise ValueError(COERCION_VALUE_ERROR.format(dtype=dtype, new_dtype=new_dtype))
+    return arr
 
 def _isalnumMUTF8(c):
     """Return True if the given UTF-8 encoded character is alphanumeric
@@ -32,7 +40,7 @@ def _isalnumMUTF8(c):
 
     Input is not checked!
     """
-    pass
+    return c.isalnum() or len(c.encode('utf-8')) > 1
 
 def is_valid_nc3_name(s):
     """Test whether an object can be validly converted to a netCDF-3
@@ -51,4 +59,23 @@ def is_valid_nc3_name(s):
     names. Names that have trailing space characters are also not
     permitted.
     """
-    pass
+    if not isinstance(s, str):
+        return False
+    if not s:
+        return False
+    if s in _reserved_names:
+        return False
+    if s[-1].isspace():
+        return False
+    if '/' in s:
+        return False
+    
+    first = s[0]
+    if not (_isalnumMUTF8(first) or first == '_'):
+        return False
+    
+    for c in s[1:]:
+        if not (_isalnumMUTF8(c) or c in _specialchars):
+            return False
+    
+    return True
