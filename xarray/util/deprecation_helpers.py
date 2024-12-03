@@ -38,7 +38,25 @@ def _deprecate_positional_args(version) -> Callable[[T], T]:
     This function is adapted from scikit-learn under the terms of its license. See
     licences/SCIKIT_LEARN_LICENSE
     """
-    pass
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            sig = inspect.signature(func)
+            bound_args = sig.bind(*args, **kwargs)
+            
+            # Check if any keyword-only argument is passed as positional
+            for name, param in sig.parameters.items():
+                if param.kind == param.KEYWORD_ONLY and name in bound_args.arguments:
+                    warnings.warn(
+                        f"Passing {name} as positional argument is deprecated "
+                        f"since version {version} and will be removed in a future version. "
+                        f"Please use keyword argument instead.",
+                        FutureWarning,
+                        stacklevel=2
+                    )
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 def deprecate_dims(func: T, old_name='dims') -> T:
     """
@@ -46,4 +64,15 @@ def deprecate_dims(func: T, old_name='dims') -> T:
     `dim`. This decorator will issue a warning if `dims` is passed while forwarding it
     to `dim`.
     """
-    pass
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        if old_name in kwargs:
+            warnings.warn(
+                f"The '{old_name}' argument is deprecated and will be removed in a future version. "
+                f"Please use 'dim' instead.",
+                FutureWarning,
+                stacklevel=2
+            )
+            kwargs['dim'] = kwargs.pop(old_name)
+        return func(*args, **kwargs)
+    return wrapper
