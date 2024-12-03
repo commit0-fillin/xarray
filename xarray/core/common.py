@@ -94,7 +94,10 @@ class AbstractArray:
         int or tuple of int
             Axis number or numbers corresponding to the given dimensions.
         """
-        pass
+        if isinstance(dim, Iterable) and not isinstance(dim, str):
+            return tuple(self.get_axis_num(d) for d in dim)
+        else:
+            return self.dims.index(dim)
 
     @property
     def sizes(self: Any) -> Mapping[Hashable, int]:
@@ -106,7 +109,7 @@ class AbstractArray:
         --------
         Dataset.sizes
         """
-        pass
+        return Frozen(dict(zip(self.dims, self.shape)))
 
 class AttrAccessMixin:
     """Mixin class that allows getting keys with attribute access"""
@@ -118,7 +121,7 @@ class AttrAccessMixin:
         extensions.
         """
         if not hasattr(object.__new__(cls), '__dict__'):
-            pass
+            return
         elif cls.__module__.startswith('xarray.'):
             raise AttributeError(f'{cls.__name__} must explicitly define __slots__')
         else:
@@ -129,12 +132,12 @@ class AttrAccessMixin:
     @property
     def _attr_sources(self) -> Iterable[Mapping[Hashable, Any]]:
         """Places to look-up items for attribute-style access"""
-        pass
+        return (self.attrs,)
 
     @property
     def _item_sources(self) -> Iterable[Mapping[Hashable, Any]]:
         """Places to look-up items for key-autocompletion"""
-        pass
+        return (self.coords, self.data_vars)
 
     def __getattr__(self, name: str) -> Any:
         if name not in {'__dict__', '__setstate__'}:
@@ -145,7 +148,13 @@ class AttrAccessMixin:
 
     def _setattr_dict(self, name: str, value: Any) -> None:
         """Deprecated third party subclass (see ``__init_subclass__`` above)"""
-        pass
+        warnings.warn(
+            f"Setting attribute {name!r} on a {type(self).__name__!r} object is deprecated. "
+            "Use __setitem__ style assignment instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        object.__setattr__(self, name, value)
 
     def __setattr__(self, name: str, value: Any) -> None:
         """Objects with ``__slots__`` raise AttributeError if you try setting an
@@ -171,7 +180,7 @@ class AttrAccessMixin:
         See http://ipython.readthedocs.io/en/stable/config/integrating.html#tab-completion
         For the details.
         """
-        pass
+        return list(self.keys())
 
 class TreeAttrAccessMixin(AttrAccessMixin):
     """Mixin class that allows getting keys with attribute access"""
@@ -184,11 +193,24 @@ class TreeAttrAccessMixin(AttrAccessMixin):
         defined in ``__slots__``. (GH9068)
         """
         if not hasattr(object.__new__(cls), '__dict__'):
-            pass
+            return
+        super().__init_subclass__(**kwargs)
 
 def get_squeeze_dims(xarray_obj, dim: Hashable | Iterable[Hashable] | None=None, axis: int | Iterable[int] | None=None) -> list[Hashable]:
     """Get a list of dimensions to squeeze out."""
-    pass
+    if dim is not None and axis is not None:
+        raise ValueError("cannot specify both 'dim' and 'axis'")
+    if dim is None and axis is None:
+        return [d for d, s in xarray_obj.sizes.items() if s == 1]
+    if isinstance(dim, Hashable) and not isinstance(dim, Iterable):
+        dim = [dim]
+    if isinstance(axis, int):
+        axis = [axis]
+    if dim is not None:
+        return [d for d in dim if xarray_obj.sizes[d] == 1]
+    if axis is not None:
+        return [xarray_obj.dims[a] for a in axis if xarray_obj.shape[a] == 1]
+    return []
 
 class DataWithCoords(AttrAccessMixin):
     """Shared base class for Dataset and DataArray."""
