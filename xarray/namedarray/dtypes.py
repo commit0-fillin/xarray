@@ -43,7 +43,16 @@ def maybe_promote(dtype: np.dtype[np.generic]) -> tuple[np.dtype[np.generic], An
     dtype : Promoted dtype that can hold missing values.
     fill_value : Valid missing value for the promoted dtype.
     """
-    pass
+    if dtype.kind in "mM":
+        return dtype, np.datetime64("NaT")
+    elif dtype.kind == "f":
+        return dtype, np.nan
+    elif dtype.kind in "iu":
+        return np.dtype("float64"), np.nan
+    elif dtype.kind == "b":
+        return np.dtype("object"), NA
+    else:
+        return np.dtype("object"), NA
 NAT_TYPES = {np.datetime64('NaT').dtype, np.timedelta64('NaT').dtype}
 
 def get_fill_value(dtype: np.dtype[np.generic]) -> Any:
@@ -57,7 +66,16 @@ def get_fill_value(dtype: np.dtype[np.generic]) -> Any:
     -------
     fill_value : Missing value corresponding to this dtype.
     """
-    pass
+    if dtype.kind in "mM":
+        return np.datetime64("NaT")
+    elif dtype.kind == "f":
+        return np.nan
+    elif dtype.kind in "iu":
+        return np.iinfo(dtype).min
+    elif dtype.kind == "b":
+        return None
+    else:
+        return NA
 
 def get_pos_infinity(dtype: np.dtype[np.generic], max_for_int: bool=False) -> float | complex | AlwaysGreaterThan:
     """Return an appropriate positive infinity for this dtype.
@@ -72,10 +90,17 @@ def get_pos_infinity(dtype: np.dtype[np.generic], max_for_int: bool=False) -> fl
     -------
     fill_value : positive infinity value corresponding to this dtype.
     """
-    pass
+    if dtype.kind == "f":
+        return np.inf
+    elif dtype.kind in "iu":
+        return np.iinfo(dtype).max if max_for_int else np.inf
+    elif dtype.kind == "c":
+        return complex(np.inf, np.inf)
+    else:
+        return INF
 
 def get_neg_infinity(dtype: np.dtype[np.generic], min_for_int: bool=False) -> float | complex | AlwaysLessThan:
-    """Return an appropriate positive infinity for this dtype.
+    """Return an appropriate negative infinity for this dtype.
 
     Parameters
     ----------
@@ -85,13 +110,20 @@ def get_neg_infinity(dtype: np.dtype[np.generic], min_for_int: bool=False) -> fl
 
     Returns
     -------
-    fill_value : positive infinity value corresponding to this dtype.
+    fill_value : negative infinity value corresponding to this dtype.
     """
-    pass
+    if dtype.kind == "f":
+        return -np.inf
+    elif dtype.kind in "iu":
+        return np.iinfo(dtype).min if min_for_int else -np.inf
+    elif dtype.kind == "c":
+        return complex(-np.inf, -np.inf)
+    else:
+        return NINF
 
 def is_datetime_like(dtype: np.dtype[np.generic]) -> TypeGuard[np.datetime64 | np.timedelta64]:
     """Check if a dtype is a subclass of the numpy datetime types"""
-    pass
+    return dtype.kind in "mM"
 
 def result_type(*arrays_and_dtypes: np.typing.ArrayLike | np.typing.DTypeLike) -> np.dtype[np.generic]:
     """Like np.result_type, but with type promotion rules matching pandas.
@@ -109,4 +141,17 @@ def result_type(*arrays_and_dtypes: np.typing.ArrayLike | np.typing.DTypeLike) -
     -------
     numpy.dtype for the result.
     """
-    pass
+    dtypes = []
+    for array_or_dtype in arrays_and_dtypes:
+        if hasattr(array_or_dtype, "dtype"):
+            dtypes.append(array_or_dtype.dtype)
+        else:
+            dtypes.append(np.dtype(array_or_dtype))
+
+    result = np.result_type(*dtypes)
+
+    for t1, t2 in PROMOTE_TO_OBJECT:
+        if any(issubclass(dt.type, t1) for dt in dtypes) and any(issubclass(dt.type, t2) for dt in dtypes):
+            return np.dtype("object")
+
+    return result
