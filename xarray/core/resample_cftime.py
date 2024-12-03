@@ -68,7 +68,12 @@ class CFTimeGrouper:
 
         with index being a CFTimeIndex instead of a DatetimeIndex.
         """
-        pass
+        bins = _get_time_bins(index, self.freq, self.closed, self.label, self.origin, self.offset)
+        labels = bins[1:]
+        
+        grouper = pd.cut(index, bins, labels=labels, include_lowest=True, right=False)
+        series = pd.Series(np.arange(len(index)), index=index)
+        return series.groupby(grouper).first()
 
 def _get_time_bins(index: CFTimeIndex, freq: BaseCFTimeOffset, closed: SideOptions, label: SideOptions, origin: str | CFTimeDatetime, offset: datetime.timedelta | None):
     """Obtain the bins and their respective labels for resampling operations.
@@ -110,7 +115,37 @@ def _get_time_bins(index: CFTimeIndex, freq: BaseCFTimeOffset, closed: SideOptio
     labels : CFTimeIndex
         Define what the user actually sees the bins labeled as.
     """
-    pass
+    if len(index) == 0:
+        return CFTimeIndex([], name=index.name), CFTimeIndex([], name=index.name)
+
+    if isinstance(origin, str):
+        if origin == 'epoch':
+            origin = index[0].replace(year=1970, month=1, day=1)
+        elif origin == 'start':
+            origin = index[0]
+        elif origin == 'start_day':
+            origin = index[0].replace(hour=0, minute=0, second=0, microsecond=0)
+        elif origin == 'end':
+            origin = index[-1]
+        elif origin == 'end_day':
+            origin = (index[-1] + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            raise ValueError(f"Invalid origin: {origin}")
+
+    if offset:
+        origin += offset
+
+    start, end = _get_range_edges(index[0], index[-1], freq, closed, origin, offset)
+    datetime_bins = cftime_range(start=start, end=end, freq=freq)
+
+    if label == 'right':
+        labels = datetime_bins[1:]
+    else:
+        labels = datetime_bins[:-1]
+
+    datetime_bins, labels = _adjust_bin_edges(datetime_bins, freq, closed, index, labels)
+
+    return datetime_bins, labels
 
 def _adjust_bin_edges(datetime_bins: CFTimeIndex, freq: BaseCFTimeOffset, closed: SideOptions, index: CFTimeIndex, labels: CFTimeIndex) -> tuple[CFTimeIndex, CFTimeIndex]:
     """This is required for determining the bin edges resampling with
@@ -143,7 +178,13 @@ def _adjust_bin_edges(datetime_bins: CFTimeIndex, freq: BaseCFTimeOffset, closed
 
     CFTimeIndex([2000-01-31 00:00:00, 2000-02-29 00:00:00], dtype='object')
     """
-    pass
+    if isinstance(freq, (MonthEnd, QuarterEnd, YearEnd)):
+        if closed == 'right':
+            datetime_bins = datetime_bins.shift(1, freq='D') - datetime.timedelta(microseconds=1)
+        else:
+            datetime_bins = datetime_bins - datetime.timedelta(microseconds=1)
+    
+    return datetime_bins, labels
 
 def _get_range_edges(first: CFTimeDatetime, last: CFTimeDatetime, freq: BaseCFTimeOffset, closed: SideOptions='left', origin: str | CFTimeDatetime='start_day', offset: datetime.timedelta | None=None):
     """Get the correct starting and ending datetimes for the resampled
@@ -183,7 +224,16 @@ def _get_range_edges(first: CFTimeDatetime, last: CFTimeDatetime, freq: BaseCFTi
     last : cftime.datetime
         Corrected ending datetime object for resampled CFTimeIndex range.
     """
-    pass
+    if isinstance(freq, Tick):
+        first, last = _adjust_dates_anchored(first, last, freq, closed, origin, offset)
+    else:
+        if closed == 'right':
+            first = freq.rollback(first)
+        else:
+            first = freq.rollforward(first)
+        last = freq.rollforward(last)
+
+    return first, last
 
 def _adjust_dates_anchored(first: CFTimeDatetime, last: CFTimeDatetime, freq: Tick, closed: SideOptions='right', origin: str | CFTimeDatetime='start_day', offset: datetime.timedelta | None=None):
     """First and last offsets should be calculated from the start day to fix
@@ -225,7 +275,35 @@ def _adjust_dates_anchored(first: CFTimeDatetime, last: CFTimeDatetime, freq: Ti
         A datetime object representing the end of a date range that has been
         adjusted to fix resampling errors.
     """
-    pass
+    if isinstance(origin, str):
+        if origin == 'epoch':
+            origin = first.replace(year=1970, month=1, day=1)
+        elif origin == 'start':
+            origin = first
+        elif origin == 'start_day':
+            origin = first.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif origin == 'end':
+            origin = last
+        elif origin == 'end_day':
+            origin = (last + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            raise ValueError(f"Invalid origin: {origin}")
+
+    if offset:
+        origin += offset
+
+    td = exact_cftime_datetime_difference(origin, first)
+    foffset = ((td.total_seconds() % freq.as_timedelta().total_seconds()) * -1) % freq.as_timedelta().total_seconds()
+    fresult = first + datetime.timedelta(seconds=foffset)
+
+    td = exact_cftime_datetime_difference(origin, last)
+    loffset = freq.as_timedelta().total_seconds() - (td.total_seconds() % freq.as_timedelta().total_seconds())
+    lresult = last + datetime.timedelta(seconds=loffset)
+
+    if closed == 'right':
+        fresult = fresult + freq.as_timedelta()
+
+    return fresult, lresult
 
 def exact_cftime_datetime_difference(a: CFTimeDatetime, b: CFTimeDatetime):
     """Exact computation of b - a
@@ -261,4 +339,8 @@ def exact_cftime_datetime_difference(a: CFTimeDatetime, b: CFTimeDatetime):
     -------
     datetime.timedelta
     """
-    pass
+    a_0 = a.replace(microsecond=0)
+    b_0 = b.replace(microsecond=0)
+    delta_seconds = (b_0 - a_0).total_seconds()
+    delta_microseconds = b.microsecond - a.microsecond
+    return datetime.timedelta(seconds=delta_seconds, microseconds=delta_microseconds)
