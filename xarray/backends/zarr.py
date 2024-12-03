@@ -33,7 +33,13 @@ def encode_zarr_attr_value(value):
     scalar array -> scalar
     other -> other (no change)
     """
-    pass
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return value.item()
+        return value.tolist()
+    elif isinstance(value, np.generic):
+        return value.item()
+    return value
 
 class ZarrArrayWrapper(BackendArray):
     __slots__ = ('dtype', 'shape', '_array')
