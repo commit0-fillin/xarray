@@ -66,44 +66,70 @@ class TreeNode(Generic[Tree]):
     @property
     def parent(self) -> Tree | None:
         """Parent of this node."""
-        pass
+        return self._parent
 
     def _check_loop(self, new_parent: Tree | None) -> None:
         """Checks that assignment of this new parent will not create a cycle."""
-        pass
+        if new_parent is not None:
+            if new_parent is self:
+                raise InvalidTreeError("Cannot set an object as its own parent.")
+            parent = new_parent
+            while parent is not None:
+                if parent is self:
+                    raise InvalidTreeError("Assignment would create a cycle in the tree.")
+                parent = parent.parent
 
     def orphan(self) -> None:
         """Detach this node from its parent."""
-        pass
+        if self._parent is not None:
+            self._pre_detach(self._parent)
+            for name, child in self._parent._children.items():
+                if child is self:
+                    del self._parent._children[name]
+                    break
+            self._parent._post_detach_children({name: self})
+            old_parent = self._parent
+            self._parent = None
+            self._post_detach(old_parent)
 
     @property
     def children(self: Tree) -> Mapping[str, Tree]:
         """Child nodes of this node, stored under a mapping via their names."""
-        pass
+        return Frozen(self._children)
 
     @staticmethod
     def _check_children(children: Mapping[str, Tree]) -> None:
         """Check children for correct types and for any duplicates."""
-        pass
+        for name, child in children.items():
+            if not isinstance(name, str):
+                raise TypeError(f"Child name must be a string, not {type(name)}")
+            if not isinstance(child, TreeNode):
+                raise TypeError(f"Child must be a TreeNode, not {type(child)}")
+        if len(set(children.values())) != len(children):
+            raise ValueError("Duplicate child nodes are not allowed")
 
     def __repr__(self) -> str:
         return f'TreeNode(children={dict(self._children)})'
 
     def _pre_detach_children(self: Tree, children: Mapping[str, Tree]) -> None:
         """Method call before detaching `children`."""
-        pass
+        for child in children.values():
+            child._pre_detach(self)
 
     def _post_detach_children(self: Tree, children: Mapping[str, Tree]) -> None:
         """Method call after detaching `children`."""
-        pass
+        for child in children.values():
+            child._post_detach(self)
 
     def _pre_attach_children(self: Tree, children: Mapping[str, Tree]) -> None:
         """Method call before attaching `children`."""
-        pass
+        for name, child in children.items():
+            child._pre_attach(self, name)
 
     def _post_attach_children(self: Tree, children: Mapping[str, Tree]) -> None:
         """Method call after attaching `children`."""
-        pass
+        for name, child in children.items():
+            child._post_attach(self, name)
 
     def _iter_parents(self: Tree) -> Iterator[Tree]:
         """Iterate up the tree, starting from the current node's parent."""
