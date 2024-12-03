@@ -35,12 +35,29 @@ def list_engines() -> dict[str, BackendEntrypoint]:
 
     # New selection mechanism introduced with Python 3.10. See GH6514.
     """
-    pass
+    engines = {}
+    for engine_name, (module_name, class_name) in BACKEND_ENTRYPOINTS.items():
+        if module_name is not None:
+            try:
+                module = __import__(module_name, fromlist=[class_name])
+                backend_class = getattr(module, class_name)
+                engines[engine_name] = backend_class()
+            except ImportError:
+                pass
+    return engines
 
 def refresh_engines() -> None:
     """Refreshes the backend engines based on installed packages."""
-    pass
+    list_engines.cache_clear()
 
 def get_backend(engine: str | type[BackendEntrypoint]) -> BackendEntrypoint:
     """Select open_dataset method based on current engine."""
-    pass
+    if isinstance(engine, str):
+        engines = list_engines()
+        if engine not in engines:
+            raise ValueError(f"Unrecognized engine {engine}")
+        return engines[engine]
+    elif issubclass(engine, BackendEntrypoint):
+        return engine()
+    else:
+        raise TypeError(f"Expected string or BackendEntrypoint subclass, got {type(engine)}")
