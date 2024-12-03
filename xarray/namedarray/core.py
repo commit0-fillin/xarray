@@ -53,7 +53,11 @@ def _new(x: NamedArray[Any, _DType_co], dims: _DimsLike | Default=_default, data
         attributes you want to store with the array.
         Will copy the attrs from x by default.
     """
-    pass
+    new_dims = x._dims if dims is _default else x._parse_dimensions(dims)
+    new_data = x._data if data is _default else data
+    new_attrs = x._attrs if attrs is _default else (dict(attrs) if attrs else None)
+    
+    return x.__class__(new_dims, new_data, new_attrs)
 
 def from_array(dims: _DimsLike, data: duckarray[_ShapeType, _DType] | ArrayLike, attrs: _AttrsLike=None) -> NamedArray[_ShapeType, _DType] | NamedArray[Any, Any]:
     """
@@ -71,7 +75,7 @@ def from_array(dims: _DimsLike, data: duckarray[_ShapeType, _DType] | ArrayLike,
         attributes you want to store with the array.
         Default is None, meaning no attributes will be stored.
     """
-    pass
+    return NamedArray(dims, data, attrs)
 
 class NamedArray(NamedArrayAggregations, Generic[_ShapeType_co, _DType_co]):
     """
@@ -142,7 +146,11 @@ class NamedArray(NamedArrayAggregations, Generic[_ShapeType_co, _DType_co]):
             attributes you want to store with the array.
             Will copy the attrs from x by default.
         """
-        pass
+        new_dims = self._dims if dims is _default else self._parse_dimensions(dims)
+        new_data = self._data if data is _default else data
+        new_attrs = self._attrs if attrs is _default else (dict(attrs) if attrs else None)
+        
+        return type(self)(new_dims, new_data, new_attrs)
 
     def _replace(self, dims: _DimsLike | Default=_default, data: duckarray[_ShapeType_co, _DType_co] | Default=_default, attrs: _AttrsLike | Default=_default) -> Self:
         """
@@ -165,7 +173,11 @@ class NamedArray(NamedArrayAggregations, Generic[_ShapeType_co, _DType_co]):
             attributes you want to store with the array.
             Will copy the attrs from x by default.
         """
-        pass
+        new_dims = self._dims if dims is _default else dims
+        new_data = self._data if data is _default else data
+        new_attrs = self._attrs if attrs is _default else attrs
+        
+        return type(self)(new_dims, new_data, new_attrs)
 
     def __copy__(self) -> Self:
         return self._copy(deep=False)
@@ -196,10 +208,14 @@ class NamedArray(NamedArrayAggregations, Generic[_ShapeType_co, _DType_co]):
         object : NamedArray
             New object with dimensions, attributes, and optionally
             data copied from original.
-
-
         """
-        pass
+        if data is None:
+            data = self._data.copy() if deep else self._data
+        else:
+            deep = False  # ignored when data is provided
+
+        new_attrs = copy.deepcopy(self._attrs) if deep else copy.copy(self._attrs)
+        return type(self)(self._dims, data, new_attrs)
 
     @property
     def ndim(self) -> int:
