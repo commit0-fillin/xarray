@@ -58,7 +58,38 @@ def open_dataset(name: str, cache: bool=True, cache_dir: None | str | os.PathLik
     open_dataset
     load_dataset
     """
-    pass
+    if cache_dir is None:
+        cache_dir = _default_cache_dir_name
+    cache_dir = os.path.expanduser(cache_dir)
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir)
+    
+    file_format = file_formats.get(name, 3)
+    dataset_id = f"{base_url}/raw/{version}/{name}.{file_format}"
+    local_file = os.path.join(cache_dir, f"{name}.{file_format}")
+    
+    if os.path.exists(local_file):
+        ds = xr.open_dataset(local_file, engine=engine, **kws)
+    else:
+        try:
+            import pooch
+        except ImportError:
+            raise ImportError("pooch is required to download datasets. Please install it using pip or conda.")
+        
+        # Download the file
+        pooch.retrieve(
+            url=dataset_id,
+            known_hash=None,
+            path=cache_dir,
+            fname=f"{name}.{file_format}",
+        )
+        ds = xr.open_dataset(local_file, engine=engine, **kws)
+    
+    if not cache:
+        ds = ds.load()
+        os.remove(local_file)
+    
+    return ds
 
 def load_dataset(*args, **kwargs) -> Dataset:
     """
@@ -97,7 +128,9 @@ def load_dataset(*args, **kwargs) -> Dataset:
     open_dataset
     load_dataset
     """
-    pass
+    ds = open_dataset(*args, **kwargs)
+    ds.load()
+    return ds
 
 def scatter_example_dataset(*, seed: None | int=None) -> Dataset:
     """
@@ -108,4 +141,28 @@ def scatter_example_dataset(*, seed: None | int=None) -> Dataset:
     seed : int, optional
         Seed for the random number generation.
     """
-    pass
+    rng = np.random.default_rng(seed)
+    
+    x = np.linspace(0, 10, 100)
+    y = np.linspace(0, 10, 100)
+    X, Y = np.meshgrid(x, y)
+    
+    # Generate random data
+    Z = rng.normal(size=(100, 100))
+    
+    # Create a Dataset
+    ds = xr.Dataset(
+        data_vars={
+            "Z": (("x", "y"), Z),
+        },
+        coords={
+            "x": x,
+            "y": y,
+        },
+    )
+    
+    # Add some metadata
+    ds.attrs["title"] = "Example Scatter Dataset"
+    ds.attrs["description"] = "A randomly generated dataset for demonstration purposes"
+    
+    return ds
