@@ -43,11 +43,23 @@ def module_available(module: str, minversion: str | None=None) -> bool:
     available : bool
         Whether the module is installed.
     """
-    pass
+    try:
+        mod = importlib.util.find_spec(module)
+        if mod is None:
+            return False
+        if minversion is not None:
+            import pkg_resources
+            try:
+                return pkg_resources.parse_version(pkg_resources.get_distribution(module).version) >= pkg_resources.parse_version(minversion)
+            except pkg_resources.DistributionNotFound:
+                return False
+        return True
+    except ImportError:
+        return False
 
 def to_0d_object_array(value: object) -> NDArray[np.object_]:
     """Given a value, wrap it in a 0-D numpy.ndarray with dtype=object."""
-    pass
+    return np.array(value, dtype=object)
 
 def drop_missing_dims(supplied_dims: Iterable[_Dim], dims: Iterable[_Dim], missing_dims: ErrorOptionsWithWarn) -> _DimsLike:
     """Depending on the setting of missing_dims, drop any dimensions from supplied_dims that
@@ -59,14 +71,50 @@ def drop_missing_dims(supplied_dims: Iterable[_Dim], dims: Iterable[_Dim], missi
     dims : Iterable of Hashable
     missing_dims : {"raise", "warn", "ignore"}
     """
-    pass
+    dims_set = set(dims)
+    result = []
+    missing = []
+
+    for dim in supplied_dims:
+        if dim in dims_set:
+            result.append(dim)
+        else:
+            missing.append(dim)
+
+    if missing:
+        if missing_dims == "raise":
+            raise ValueError(f"Dimensions {missing} not found in array dimensions {dims_set}")
+        elif missing_dims == "warn":
+            warnings.warn(f"Dimensions {missing} not found in array dimensions {dims_set}")
+
+    return tuple(result)
 
 def infix_dims(dims_supplied: Iterable[_Dim], dims_all: Iterable[_Dim], missing_dims: ErrorOptionsWithWarn='raise') -> Iterator[_Dim]:
     """
     Resolves a supplied list containing an ellipsis representing other items, to
     a generator with the 'realized' list of all items
     """
-    pass
+    dims_supplied = list(dims_supplied)
+    dims_all = list(dims_all)
+
+    if Ellipsis not in dims_supplied:
+        yield from drop_missing_dims(dims_supplied, dims_all, missing_dims)
+        return
+
+    ellipsis_index = dims_supplied.index(Ellipsis)
+    before_ellipsis = dims_supplied[:ellipsis_index]
+    after_ellipsis = dims_supplied[ellipsis_index + 1:]
+
+    for dim in drop_missing_dims(before_ellipsis, dims_all, missing_dims):
+        yield dim
+
+    dims_set = set(dims_all)
+    for dim in dims_all:
+        if dim not in before_ellipsis and dim not in after_ellipsis:
+            yield dim
+
+    for dim in drop_missing_dims(after_ellipsis, dims_all, missing_dims):
+        yield dim
 
 class ReprObject:
     """Object that prints as the given value, for use with sentinel values."""
