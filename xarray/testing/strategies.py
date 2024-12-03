@@ -31,14 +31,27 @@ def supported_dtypes() -> st.SearchStrategy[np.dtype]:
     --------
     :ref:`testing.hypothesis`_
     """
-    pass
+    return st.one_of(
+        npst.integer_dtypes(endianness="="),
+        npst.floating_dtypes(endianness="="),
+        npst.complex_number_dtypes(endianness="="),
+        st.just(np.dtype("bool")),
+        st.just(np.dtype("object")),
+    )
 
 def pandas_index_dtypes() -> st.SearchStrategy[np.dtype]:
     """
     Dtypes supported by pandas indexes.
     Restrict datetime64 and timedelta64 to ns frequency till Xarray relaxes that.
     """
-    pass
+    return st.one_of(
+        npst.integer_dtypes(endianness="="),
+        npst.floating_dtypes(endianness="="),
+        st.just(np.dtype("bool")),
+        st.just(np.dtype("object")),
+        st.just(np.dtype("datetime64[ns]")),
+        st.just(np.dtype("timedelta64[ns]")),
+    )
 _readable_characters = st.characters(categories=['L', 'N'], max_codepoint=383)
 
 def names() -> st.SearchStrategy[str]:
@@ -51,7 +64,7 @@ def names() -> st.SearchStrategy[str]:
     --------
     :ref:`testing.hypothesis`_
     """
-    pass
+    return st.text(_readable_characters, min_size=1, max_size=10).filter(lambda x: x.isidentifier())
 
 def dimension_names(*, name_strategy=names(), min_dims: int=0, max_dims: int=3) -> st.SearchStrategy[list[Hashable]]:
     """
@@ -68,7 +81,7 @@ def dimension_names(*, name_strategy=names(), min_dims: int=0, max_dims: int=3) 
     max_dims
         Maximum number of dimensions in generated list.
     """
-    pass
+    return st.lists(name_strategy, min_size=min_dims, max_size=max_dims, unique=True)
 
 def dimension_sizes(*, dim_names: st.SearchStrategy[Hashable]=names(), min_dims: int=0, max_dims: int=3, min_side: int=1, max_side: Union[int, None]=None) -> st.SearchStrategy[Mapping[Hashable, int]]:
     """
@@ -98,7 +111,15 @@ def dimension_sizes(*, dim_names: st.SearchStrategy[Hashable]=names(), min_dims:
     --------
     :ref:`testing.hypothesis`_
     """
-    pass
+    if max_side is None:
+        max_side = min_side + 5
+    
+    return st.dictionaries(
+        keys=dim_names,
+        values=st.integers(min_value=min_side, max_value=max_side),
+        min_size=min_dims,
+        max_size=max_dims
+    )
 _readable_strings = st.text(_readable_characters, max_size=5)
 _attr_keys = _readable_strings
 _small_arrays = npst.arrays(shape=npst.array_shapes(max_side=2, max_dims=2), dtype=npst.scalar_dtypes() | npst.byte_string_dtypes() | npst.unicode_string_dtypes())
@@ -117,7 +138,11 @@ def attrs() -> st.SearchStrategy[Mapping[Hashable, Any]]:
     --------
     :ref:`testing.hypothesis`_
     """
-    pass
+    return st.recursive(
+        simple_attrs,
+        lambda children: st.dictionaries(_attr_keys, children | _attr_values),
+        max_leaves=5
+    )
 
 @st.composite
 def variables(draw: st.DrawFn, *, array_strategy_fn: Union[ArrayStrategyFn, None]=None, dims: Union[st.SearchStrategy[Union[Sequence[Hashable], Mapping[Hashable, int]]], None]=None, dtype: st.SearchStrategy[np.dtype]=supported_dtypes(), attrs: st.SearchStrategy[Mapping]=attrs()) -> xr.Variable:
@@ -202,7 +227,28 @@ def variables(draw: st.DrawFn, *, array_strategy_fn: Union[ArrayStrategyFn, None
     --------
     :ref:`testing.hypothesis`_
     """
-    pass
+    if array_strategy_fn is None:
+        array_strategy_fn = lambda shape, dtype: npst.arrays(shape=shape, dtype=dtype)
+
+    if dims is None:
+        dims = dimension_sizes()
+
+    drawn_dims = draw(dims)
+    drawn_dtype = draw(dtype)
+
+    if isinstance(drawn_dims, Mapping):
+        shape = tuple(drawn_dims.values())
+        dim_names = list(drawn_dims.keys())
+    else:
+        dim_names = drawn_dims
+        shape = draw(st.tuples(*[st.integers(1, 5) for _ in dim_names]))
+
+    array_strategy = array_strategy_fn(shape=shape, dtype=drawn_dtype)
+    data = draw(array_strategy)
+
+    drawn_attrs = draw(attrs)
+
+    return xr.Variable(dims=dim_names, data=data, attrs=drawn_attrs)
 
 @st.composite
 def unique_subset_of(draw: st.DrawFn, objs: Union[Sequence[Hashable], Mapping[Hashable, Any]], *, min_size: int=0, max_size: Union[int, None]=None) -> Union[Sequence[Hashable], Mapping[Hashable, Any]]:
@@ -239,4 +285,13 @@ def unique_subset_of(draw: st.DrawFn, objs: Union[Sequence[Hashable], Mapping[Ha
     --------
     :ref:`testing.hypothesis`_
     """
-    pass
+    if isinstance(objs, Mapping):
+        keys = list(objs.keys())
+        if max_size is None:
+            max_size = len(keys)
+        subset_keys = draw(st.sets(st.sampled_from(keys), min_size=min_size, max_size=max_size))
+        return {k: objs[k] for k in subset_keys}
+    else:
+        if max_size is None:
+            max_size = len(objs)
+        return draw(st.sets(st.sampled_from(objs), min_size=min_size, max_size=max_size))
