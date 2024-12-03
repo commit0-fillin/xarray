@@ -81,7 +81,10 @@ class AggregationGenerator:
     preamble: str = field(init=False)
 
     def __post_init__(self):
-        self.preamble = self.definition_preamble.format(obj=self.datastructure.name, cls=self.cls)
+        self.preamble = self.definition_preamble.format(
+            obj=self.datastructure.name,
+            cls=self.cls
+        )
 
 class GroupByAggregationGenerator(AggregationGenerator):
     _dim_docstring = _DIM_DOCSTRING_GROUPBY
