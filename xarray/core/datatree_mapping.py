@@ -44,7 +44,21 @@ def check_isomorphic(a: DataTree, b: DataTree, require_names_equal: bool=False, 
         Also optionally raised if their structure is isomorphic, but the names of any two
         respective nodes are not equal.
     """
-    pass
+    if not isinstance(a, DataTree) or not isinstance(b, DataTree):
+        raise TypeError("Both arguments must be DataTree objects")
+
+    if check_from_root:
+        a = a.root
+        b = b.root
+
+    if require_names_equal and a.name != b.name:
+        raise TreeIsomorphismError(f"Node names differ: {a.name} != {b.name}")
+
+    if len(a.children) != len(b.children):
+        raise TreeIsomorphismError("Trees have different number of children")
+
+    for child_a, child_b in zip(a.children.values(), b.children.values()):
+        check_isomorphic(child_a, child_b, require_names_equal, False)
 
 def map_over_subtree(func: Callable) -> Callable:
     """
@@ -90,16 +104,77 @@ def map_over_subtree(func: Callable) -> Callable:
     DataTree.map_over_subtree_inplace
     DataTree.subtree
     """
-    pass
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        trees = [arg for arg in args if isinstance(arg, DataTree)]
+        if not trees:
+            raise ValueError("At least one argument must be a DataTree")
+
+        check_isomorphic(*trees)
+
+        def apply_func(node, *node_args):
+            if node.ds is not None:
+                return func(node.ds, *node_args)
+            return None
+
+        result_trees = []
+        for tree in trees:
+            result_tree = tree.copy()
+            for node in result_tree.subtree:
+                node_args = [arg[node.path] if isinstance(arg, DataTree) else arg for arg in args]
+                node_kwargs = {k: v[node.path] if isinstance(v, DataTree) else v for k, v in kwargs.items()}
+                result = apply_func(node, *node_args, **node_kwargs)
+                if result is not None:
+                    node._set_node_data(result)
+            result_trees.append(result_tree)
+
+        return result_trees[0] if len(result_trees) == 1 else tuple(result_trees)
+
+    return wrapper
 
 def _handle_errors_with_path_context(path: str):
     """Wraps given function so that if it fails it also raises path to node on which it failed."""
-    pass
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                raise type(e)(f"Error at path '{path}': {str(e)}") from e
+        return wrapper
+    return decorator
 
 def _check_single_set_return_values(path_to_node: str, obj: Dataset | DataArray | tuple[Dataset | DataArray]):
     """Check types returned from single evaluation of func, and return number of return values received from func."""
-    pass
+    if isinstance(obj, (Dataset, DataArray)):
+        return 1
+    elif isinstance(obj, tuple):
+        if all(isinstance(item, (Dataset, DataArray)) for item in obj):
+            return len(obj)
+        else:
+            raise TypeError(f"At path '{path_to_node}': All items in the returned tuple must be Dataset or DataArray objects")
+    else:
+        raise TypeError(f"At path '{path_to_node}': Return value must be a Dataset, DataArray, or a tuple of these types")
 
 def _check_all_return_values(returned_objects):
     """Walk through all values returned by mapping func over subtrees, raising on any invalid or inconsistent types."""
-    pass
+    if not returned_objects:
+        return
+
+    first_return = returned_objects[0]
+    expected_type = type(first_return)
+    expected_length = len(first_return) if isinstance(first_return, tuple) else 1
+
+    for obj in returned_objects:
+        if not isinstance(obj, expected_type):
+            raise TypeError(f"Inconsistent return types: expected {expected_type}, got {type(obj)}")
+        
+        if isinstance(obj, tuple):
+            if len(obj) != expected_length:
+                raise ValueError(f"Inconsistent tuple lengths: expected {expected_length}, got {len(obj)}")
+            
+            for item in obj:
+                if not isinstance(item, (Dataset, DataArray)):
+                    raise TypeError(f"All items in returned tuples must be Dataset or DataArray objects")
+        elif not isinstance(obj, (Dataset, DataArray)):
+            raise TypeError(f"Return value must be a Dataset, DataArray, or a tuple of these types")
