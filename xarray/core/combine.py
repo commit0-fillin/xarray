@@ -13,7 +13,7 @@ from xarray.core.utils import iterate_nested
 if TYPE_CHECKING:
     from xarray.core.types import CombineAttrsOptions, CompatOptions, JoinOptions
 
-def _infer_tile_ids_from_nested_list(entry, current_pos):
+def _infer_tile_ids_from_nested_list(entry, current_pos=()):
     """
     Given a list of lists (of lists...) of objects, returns a iterator
     which returns a tuple containing the index of each object in the nested
@@ -29,23 +29,40 @@ def _infer_tile_ids_from_nested_list(entry, current_pos):
     entry : list[list[obj, obj, ...], ...]
         List of lists of arbitrary depth, containing objects in the order
         they are to be concatenated.
+    current_pos : tuple
+        Current position in the nested structure.
 
     Returns
     -------
     combined_tile_ids : dict[tuple(int, ...), obj]
     """
-    pass
+    if isinstance(entry, list):
+        for i, item in enumerate(entry):
+            yield from _infer_tile_ids_from_nested_list(item, current_pos + (i,))
+    else:
+        yield (current_pos, entry)
 
 def _check_dimension_depth_tile_ids(combined_tile_ids):
     """
     Check all tuples are the same length, i.e. check that all lists are
     nested to the same depth.
     """
-    pass
+    depths = {len(key) for key in combined_tile_ids.keys()}
+    if len(depths) > 1:
+        raise ValueError("Inconsistent depths in combined_tile_ids")
 
 def _check_shape_tile_ids(combined_tile_ids):
     """Check all lists along one dimension are same length."""
-    pass
+    if not combined_tile_ids:
+        return
+
+    depths = [len(key) for key in combined_tile_ids.keys()]
+    max_depth = max(depths)
+
+    for dim in range(max_depth):
+        indices = [key[dim] for key in combined_tile_ids.keys() if len(key) > dim]
+        if len(set(indices)) != max(indices) + 1:
+            raise ValueError(f"Inconsistent lengths along dimension {dim}")
 
 def _combine_nd(combined_ids, concat_dims, data_vars='all', coords='different', compat: CompatOptions='no_conflicts', fill_value=dtypes.NA, join: JoinOptions='outer', combine_attrs: CombineAttrsOptions='drop'):
     """
@@ -70,14 +87,54 @@ def _combine_nd(combined_ids, concat_dims, data_vars='all', coords='different', 
     -------
     combined_ds : xarray.Dataset
     """
-    pass
+    if len(combined_ids) == 1:
+        return next(iter(combined_ids.values()))
+
+    # Recursively combine datasets along each dimension
+    def _combine_dim(dim_index, combined_ids):
+        if dim_index == len(concat_dims):
+            return next(iter(combined_ids.values()))
+
+        dim = concat_dims[dim_index]
+        grouped = {}
+        for key, ds in combined_ids.items():
+            grouped.setdefault(key[:dim_index], []).append(ds)
+
+        if dim is None:
+            # Merge datasets
+            return merge(
+                [_combine_dim(dim_index + 1, {k: v for k, v in combined_ids.items() if k[:dim_index] == key})
+                 for key in grouped],
+                compat=compat,
+                fill_value=fill_value,
+                join=join,
+                combine_attrs=combine_attrs
+            )
+        else:
+            # Concatenate datasets
+            return concat(
+                [_combine_dim(dim_index + 1, {k[dim_index + 1:]: v for k, v in combined_ids.items() if k[:dim_index] == key})
+                 for key in grouped],
+                dim=dim,
+                data_vars=data_vars,
+                coords=coords,
+                compat=compat,
+                fill_value=fill_value,
+                join=join,
+                combine_attrs=combine_attrs
+            )
+
+    return _combine_dim(0, combined_ids)
 
 def _combine_1d(datasets, concat_dim, compat: CompatOptions='no_conflicts', data_vars='all', coords='different', fill_value=dtypes.NA, join: JoinOptions='outer', combine_attrs: CombineAttrsOptions='drop'):
     """
     Applies either concat or merge to 1D list of datasets depending on value
     of concat_dim
     """
-    pass
+    if concat_dim is not None:
+        return concat(datasets, dim=concat_dim, data_vars=data_vars, coords=coords, compat=compat, fill_value=fill_value, join=join, combine_attrs=combine_attrs)
+    else:
+        return merge(datasets, compat=compat, fill_value=fill_value, join=join, combine_attrs=combine_attrs)
 DATASET_HYPERCUBE = Union[Dataset, Iterable['DATASET_HYPERCUBE']]
 
 def combine_nested(datasets: DATASET_HYPERCUBE, concat_dim: str | DataArray | None | Sequence[str | DataArray | pd.Index | None], compat: str='no_conflicts', data_vars: str='all', coords: str='different', fill_value: object=dtypes.NA, join: JoinOptions='outer', combine_attrs: CombineAttrsOptions='drop') -> Dataset:
@@ -260,7 +317,17 @@ def combine_nested(datasets: DATASET_HYPERCUBE, concat_dim: str | DataArray | No
     concat
     merge
     """
-    pass
+    if not isinstance(concat_dim, (list, tuple)):
+        concat_dim = [concat_dim]
+    
+    if len(concat_dim) == 0:
+        raise ValueError("concat_dim must be specified")
+
+    combined_ids = _infer_tile_ids_from_nested_list(datasets)
+    _check_dimension_depth_tile_ids(combined_ids)
+    _check_shape_tile_ids(combined_ids)
+
+    return _combine_nd(combined_ids, concat_dim, data_vars=data_vars, coords=coords, compat=compat, fill_value=fill_value, join=join, combine_attrs=combine_attrs)
 
 def _combine_single_variable_hypercube(datasets, fill_value=dtypes.NA, data_vars='all', coords='different', compat: CompatOptions='no_conflicts', join: JoinOptions='outer', combine_attrs: CombineAttrsOptions='no_conflicts'):
     """
@@ -273,7 +340,34 @@ def _combine_single_variable_hypercube(datasets, fill_value=dtypes.NA, data_vars
 
     This function is NOT part of the public API.
     """
-    pass
+    if len(datasets) == 0:
+        return Dataset()
+
+    if len(datasets) == 1:
+        return datasets[0]
+
+    all_coords = set()
+    for ds in datasets:
+        all_coords.update(ds.coords)
+
+    concat_dims = []
+    for coord in all_coords:
+        values = set()
+        for ds in datasets:
+            if coord in ds.coords:
+                values.update(ds.coords[coord].values)
+        if len(values) > 1:
+            concat_dims.append(coord)
+
+    if not concat_dims:
+        return merge(datasets, compat=compat, fill_value=fill_value, join=join, combine_attrs=combine_attrs)
+
+    combined_ids = {}
+    for ds in datasets:
+        key = tuple(ds.coords[dim].values[0] if dim in ds.coords else None for dim in concat_dims)
+        combined_ids[key] = ds
+
+    return _combine_nd(combined_ids, concat_dims, data_vars=data_vars, coords=coords, compat=compat, fill_value=fill_value, join=join, combine_attrs=combine_attrs)
 
 def combine_by_coords(data_objects: Iterable[Dataset | DataArray]=[], compat: CompatOptions='no_conflicts', data_vars: Literal['all', 'minimal', 'different'] | list[str]='all', coords: str='different', fill_value: object=dtypes.NA, join: JoinOptions='outer', combine_attrs: CombineAttrsOptions='no_conflicts') -> Dataset | DataArray:
     """
@@ -526,4 +620,42 @@ def combine_by_coords(data_objects: Iterable[Dataset | DataArray]=[], compat: Co
     Finally, if you attempt to combine a mix of unnamed DataArrays with either named
     DataArrays or Datasets, a ValueError will be raised (as this is an ambiguous operation).
     """
-    pass
+    if not data_objects:
+        return Dataset()
+
+    if all(isinstance(obj, DataArray) for obj in data_objects):
+        if all(obj.name is not None for obj in data_objects):
+            data_objects = [obj.to_dataset() for obj in data_objects]
+        elif any(obj.name is not None for obj in data_objects):
+            raise ValueError("Cannot combine mix of named and unnamed DataArrays")
+        else:
+            return _combine_single_variable_hypercube(data_objects, fill_value=fill_value, data_vars=data_vars, coords=coords, compat=compat, join=join, combine_attrs=combine_attrs)
+
+    datasets = [obj if isinstance(obj, Dataset) else obj.to_dataset() for obj in data_objects]
+
+    # Identify the dimensions to concatenate along
+    concat_dims = set()
+    for ds in datasets:
+        for dim in ds.dims:
+            if dim in ds.coords and any(not ds.coords[dim].equals(other.coords[dim]) for other in datasets if dim in other.coords):
+                concat_dims.add(dim)
+
+    # Sort datasets based on coordinate values
+    def sort_key(ds):
+        return tuple(ds.coords[dim].values[0] if dim in ds.coords else np.nan for dim in concat_dims)
+
+    sorted_datasets = sorted(datasets, key=sort_key)
+
+    # Combine datasets
+    combined = _combine_nd(
+        {tuple(ds.coords[dim].values[0] if dim in ds.coords else None for dim in concat_dims): ds for ds in sorted_datasets},
+        list(concat_dims),
+        data_vars=data_vars,
+        coords=coords,
+        compat=compat,
+        fill_value=fill_value,
+        join=join,
+        combine_attrs=combine_attrs
+    )
+
+    return combined
