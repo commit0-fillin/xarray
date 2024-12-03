@@ -38,15 +38,36 @@ def inverse_permutation(indices: np.ndarray, N: int | None=None) -> np.ndarray:
         Integer indices to take from the original array to create the
         permutation.
     """
-    pass
+    if N is None:
+        N = len(indices)
+    inverse = np.empty(N, dtype=int)
+    inverse[indices] = np.arange(N)
+    return inverse
 
 def _is_contiguous(positions):
     """Given a non-empty list, does it consist of contiguous integers?"""
-    pass
+    if len(positions) <= 1:
+        return True
+    return np.all(np.diff(positions) == 1)
 
 def _advanced_indexer_subspaces(key):
     """Indices of the advanced indexes subspaces for mixed indexing and vindex."""
-    pass
+    if not isinstance(key, tuple):
+        key = (key,)
+    
+    advanced_index_positions = [
+        i for i, k in enumerate(key) 
+        if isinstance(k, (np.ndarray, list)) and not isinstance(k, str)
+    ]
+    
+    if not advanced_index_positions:
+        return [], []
+    
+    non_advanced_index_positions = [
+        i for i in range(len(key)) if i not in advanced_index_positions
+    ]
+    
+    return advanced_index_positions, non_advanced_index_positions
 
 class NumpyVIndexAdapter:
     """Object that implements indexing like vindex on a np.ndarray.
