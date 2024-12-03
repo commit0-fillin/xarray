@@ -58,14 +58,37 @@ def _prepare_plot1d_data(darray: T_DataArray, coords_to_plot: MutableMapping[str
     >>> print({k: v.name for k, v in plts.items()})
     {'y': 'a', 'x': 1}
     """
-    pass
+    plts = {}
+    
+    # Handle y-axis data
+    if darray.name:
+        plts['y'] = darray
+    else:
+        plts['y'] = darray.rename('y')
+    
+    # Handle x-axis data
+    x_coord = coords_to_plot.get('x')
+    if x_coord is not None:
+        if isinstance(x_coord, str):
+            plts['x'] = darray[x_coord]
+        else:
+            plts['x'] = darray.coords[x_coord]
+    else:
+        plts['x'] = darray.dims[0]
+    
+    # Handle hue data
+    hue_coord = coords_to_plot.get('hue')
+    if hue_coord is not None:
+        plts['hue'] = darray.coords[hue_coord]
+    
+    # Handle size data
+    size_coord = coords_to_plot.get('size')
+    if size_coord is not None:
+        plts['size'] = darray.coords[size_coord]
+    
+    return plts
 
-def plot(darray: DataArray, *, row: Hashable | None=None, col: Hashable | None=None, col_wrap: int | None=None, ax: Axes | None=None, hue: Hashable | None=None, subplot_kws: dict[str, Any] | None=None, **kwargs: Any) -> Any:
-    """
-    Default plot of DataArray using :py:mod:`matplotlib:matplotlib.pyplot`.
-
-    Calls xarray plotting function based on the dimensions of
-    the squeezed DataArray.
+    Dimensions      Plotting function
 
     =============== ===========================
     Dimensions      Plotting function
@@ -158,7 +181,53 @@ def line(darray: T_DataArray, *args: Any, row: Hashable | None=None, col: Hashab
         When either col or row is given, returns a FacetGrid, otherwise
         a list of matplotlib Line3D objects.
     """
-    pass
+    import matplotlib.pyplot as plt
+
+    # If faceting, use FacetGrid
+    if row or col:
+        return _easy_facetgrid(darray, row=row, col=col, figsize=figsize, aspect=aspect, size=size, hue=hue, x=x, y=y, **kwargs)
+
+    # Prepare the data
+    coords_to_plot = {'x': x, 'y': y, 'hue': hue}
+    plts = _prepare_plot1d_data(darray, coords_to_plot)
+
+    # Create or get the axes
+    if ax is None:
+        if figsize is not None:
+            plt.figure(figsize=figsize)
+        ax = plt.gca()
+
+    # Plot the data
+    lines = ax.plot(plts['x'], plts['y'], *args, **kwargs)
+
+    # Set scales
+    if xscale:
+        ax.set_xscale(xscale)
+    if yscale:
+        ax.set_yscale(yscale)
+
+    # Set limits
+    if xlim:
+        ax.set_xlim(xlim)
+    if ylim:
+        ax.set_ylim(ylim)
+
+    # Set ticks
+    if xticks is not None:
+        ax.set_xticks(xticks)
+    if yticks is not None:
+        ax.set_yticks(yticks)
+
+    # Set labels
+    if _labels:
+        ax.set_xlabel(label_from_attrs(plts['x']))
+        ax.set_ylabel(label_from_attrs(plts['y']))
+
+    # Add legend if needed
+    if add_legend and hue is not None:
+        ax.legend()
+
+    return lines
 
 def step(darray: DataArray, *args: Any, where: Literal['pre', 'post', 'mid']='pre', drawstyle: str | None=None, ds: str | None=None, row: Hashable | None=None, col: Hashable | None=None, **kwargs: Any) -> list[Line3D] | FacetGrid[DataArray]:
     """
