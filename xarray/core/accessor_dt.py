@@ -17,19 +17,25 @@ if TYPE_CHECKING:
 
 def _season_from_months(months):
     """Compute season (DJF, MAM, JJA, SON) from month ordinal"""
-    pass
+    seasons = {1: 'DJF', 2: 'DJF', 3: 'MAM', 4: 'MAM', 5: 'MAM', 6: 'JJA',
+               7: 'JJA', 8: 'JJA', 9: 'SON', 10: 'SON', 11: 'SON', 12: 'DJF'}
+    return np.vectorize(seasons.get)(months)
 
 def _access_through_cftimeindex(values, name):
     """Coerce an array of datetime-like values to a CFTimeIndex
     and access requested datetime component
     """
-    pass
+    from xarray.coding.cftimeindex import CFTimeIndex
+    index = CFTimeIndex(values)
+    return getattr(index, name)
 
 def _access_through_series(values, name):
     """Coerce an array of datetime-like values to a pandas Series and
     access requested datetime component
     """
-    pass
+    import pandas as pd
+    series = pd.Series(values)
+    return getattr(series.dt, name)
 
 def _get_date_field(values, name, dtype):
     """Indirectly access pandas' libts.get_date_field by wrapping data
@@ -50,13 +56,24 @@ def _get_date_field(values, name, dtype):
         Array-like of datetime fields accessed for each element in values
 
     """
-    pass
+    if is_duck_dask_array(values):
+        import dask.array as da
+        return da.map_overlap(_access_through_series, values, name=name, dtype=dtype)
+    else:
+        return _access_through_series(values, name).astype(dtype)
 
 def _round_through_series_or_index(values, name, freq):
     """Coerce an array of datetime-like values to a pandas Series or xarray
     CFTimeIndex and apply requested rounding
     """
-    pass
+    if contains_cftime_datetimes(values):
+        from xarray.coding.cftimeindex import CFTimeIndex
+        index = CFTimeIndex(values)
+        return getattr(index, name)(freq=freq)
+    else:
+        import pandas as pd
+        series = pd.Series(values)
+        return getattr(series.dt, name)(freq=freq)
 
 def _round_field(values, name, freq):
     """Indirectly access rounding functions by wrapping data
@@ -77,19 +94,27 @@ def _round_field(values, name, freq):
         Array-like of datetime fields accessed for each element in values
 
     """
-    pass
+    if is_duck_dask_array(values):
+        import dask.array as da
+        return da.map_overlap(_round_through_series_or_index, values, name=name, freq=freq)
+    else:
+        return _round_through_series_or_index(values, name, freq)
 
 def _strftime_through_cftimeindex(values, date_format: str):
     """Coerce an array of cftime-like values to a CFTimeIndex
     and access requested datetime component
     """
-    pass
+    from xarray.coding.cftimeindex import CFTimeIndex
+    index = CFTimeIndex(values)
+    return index.strftime(date_format)
 
 def _strftime_through_series(values, date_format: str):
     """Coerce an array of datetime-like values to a pandas Series and
     apply string formatting
     """
-    pass
+    import pandas as pd
+    series = pd.Series(values)
+    return series.dt.strftime(date_format)
 
 class TimeAccessor(Generic[T_DataArray]):
     __slots__ = ('_obj',)
@@ -111,7 +136,7 @@ class TimeAccessor(Generic[T_DataArray]):
         floor-ed timestamps : same type as values
             Array-like of datetime fields accessed for each element in values
         """
-        pass
+        return self._obj._replace(_data=_round_field(self._obj.data, "floor", freq))
 
     def ceil(self, freq: str) -> T_DataArray:
         """
@@ -127,7 +152,7 @@ class TimeAccessor(Generic[T_DataArray]):
         ceil-ed timestamps : same type as values
             Array-like of datetime fields accessed for each element in values
         """
-        pass
+        return self._obj._replace(_data=_round_field(self._obj.data, "ceil", freq))
 
     def round(self, freq: str) -> T_DataArray:
         """
@@ -143,7 +168,7 @@ class TimeAccessor(Generic[T_DataArray]):
         rounded timestamps : same type as values
             Array-like of datetime fields accessed for each element in values
         """
-        pass
+        return self._obj._replace(_data=_round_field(self._obj.data, "round", freq))
 
 class DatetimeAccessor(TimeAccessor[T_DataArray]):
     """Access datetime fields for DataArrays with datetime-like dtypes.
