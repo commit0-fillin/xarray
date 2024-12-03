@@ -34,7 +34,14 @@ def infer_freq(index):
     ValueError
         If there are fewer than three values or the index is not 1D.
     """
-    pass
+    if isinstance(index, CFTimeIndex):
+        return _CFTimeFrequencyInferer(index).get_freq()
+    elif isinstance(index, (pd.DatetimeIndex, pd.TimedeltaIndex)):
+        return pd.infer_freq(index)
+    elif isinstance(index, (pd.Series, xr.DataArray)):
+        return pd.infer_freq(pd.Index(index.values))
+    else:
+        raise TypeError("Index must be CFTimeIndex, DatetimeIndex, TimedeltaIndex, Series, or DataArray")
 
 class _CFTimeFrequencyInferer:
 
@@ -57,34 +64,70 @@ class _CFTimeFrequencyInferer:
         -------
         str or None
         """
-        pass
+        if not self.is_monotonic:
+            return None
+
+        if len(self.index) < 3:
+            return None
+
+        delta_microseconds = self.deltas[0]
+        if is_multiple(delta_microseconds, _ONE_DAY):
+            return self._infer_daily_rule()
+
+        if is_multiple(delta_microseconds, _ONE_HOUR):
+            return self._infer_hourly_rule()
+
+        if is_multiple(delta_microseconds, _ONE_MINUTE):
+            return self._infer_minute_rule()
+
+        if is_multiple(delta_microseconds, _ONE_SECOND):
+            return self._infer_second_rule()
+
+        if is_multiple(delta_microseconds, _ONE_MILLI):
+            return self._infer_millisecond_rule()
+
+        if is_multiple(delta_microseconds, _ONE_MICRO):
+            return self._infer_microsecond_rule()
+
+        return None
 
     @property
     def deltas(self):
         """Sorted unique timedeltas as microseconds."""
-        pass
+        if self._deltas is None:
+            deltas = np.diff(self.values)
+            self._deltas = _unique_deltas(deltas)
+        return self._deltas
 
     @property
     def year_deltas(self):
         """Sorted unique year deltas."""
-        pass
+        if self._year_deltas is None:
+            years = np.array([dt.year for dt in self.index])
+            self._year_deltas = _unique_deltas(np.diff(years))
+        return self._year_deltas
 
     @property
     def month_deltas(self):
         """Sorted unique month deltas."""
-        pass
+        if self._month_deltas is None:
+            months = np.array([dt.year * 12 + dt.month for dt in self.index])
+            self._month_deltas = _unique_deltas(np.diff(months))
+        return self._month_deltas
 
 def _unique_deltas(arr):
     """Sorted unique deltas of numpy array"""
-    pass
+    return np.unique(arr)
 
 def _is_multiple(us, mult: int):
     """Whether us is a multiple of mult"""
-    pass
+    return us % mult == 0
 
 def _maybe_add_count(base: str, count: float):
     """If count is greater than 1, add it to the base offset string"""
-    pass
+    if count > 1:
+        return f"{count}{base}"
+    return base
 
 def month_anchor_check(dates):
     """Return the monthly offset string.
@@ -96,4 +139,12 @@ def month_anchor_check(dates):
     Replicated pandas._libs.tslibs.resolution.month_position_check
     but without business offset handling.
     """
-    pass
+    first_day = all(date.day == 1 for date in dates)
+    last_day = all(date.day == _days_in_month(date) for date in dates)
+
+    if first_day:
+        return "cs"
+    elif last_day:
+        return "ce"
+    else:
+        return None
