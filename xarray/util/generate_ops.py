@@ -40,7 +40,36 @@ COPY_DOCSTRING = '    {method}.__doc__ = {func}.__doc__'
 
 def render(ops_info: dict[str, list[OpsType]]) -> Iterator[str]:
     """Render the module or stub file."""
-    pass
+    yield MODULE_PREAMBLE
+
+    for cls_name, ops_list in ops_info.items():
+        yield CLASS_PREAMBLE.format(newline='\n', cls_name=cls_name)
+
+        for ops, required_method, kwargs in ops_list:
+            yield required_method.format(**kwargs)
+
+            for method, func in ops:
+                if method is None or func is None:
+                    continue
+
+                if 'overload' in kwargs:
+                    template = template_binop_overload
+                elif method.startswith('__r'):
+                    template = template_reflexive
+                elif method.startswith('__i'):
+                    template = template_inplace
+                elif method in dict(UNARY_OPS):
+                    template = template_unary
+                elif method in dict(OTHER_UNARY_METHODS):
+                    template = template_other_unary
+                else:
+                    template = template_binop
+
+                yield template.format(method=method, func=func, **kwargs)
+                yield COPY_DOCSTRING.format(method=method, func=func)
+
+        if '__eq__' in dict(ops):
+            yield unhashable
 if __name__ == '__main__':
     for line in render(ops_info):
         print(line)
