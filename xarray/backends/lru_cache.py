@@ -53,7 +53,10 @@ class LRUCache(MutableMapping[K, V]):
 
     def _enforce_size_limit(self, capacity: int) -> None:
         """Shrink the cache if necessary, evicting the oldest items."""
-        pass
+        while len(self._cache) > capacity:
+            key, value = self._cache.popitem(last=False)
+            if self._on_evict is not None:
+                self._on_evict(key, value)
 
     def __setitem__(self, key: K, value: V) -> None:
         with self._lock:
@@ -78,9 +81,15 @@ class LRUCache(MutableMapping[K, V]):
     @property
     def maxsize(self) -> int:
         """Maximum number of items can be held in the cache."""
-        pass
+        return self._maxsize
 
     @maxsize.setter
     def maxsize(self, size: int) -> None:
         """Resize the cache, evicting the oldest items if necessary."""
-        pass
+        if not isinstance(size, int):
+            raise TypeError('maxsize must be an integer')
+        if size < 0:
+            raise ValueError('maxsize must be non-negative')
+        with self._lock:
+            self._maxsize = size
+            self._enforce_size_limit(size)
