@@ -55,7 +55,7 @@ jobs:
           echo "TODAY=$(date  +'%Y-%m-%d')" >> $GITHUB_ENV
 
       - name: Setup micromamba
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v2
         with:
           environment-file: ${{env.CONDA_ENV_FILE}}
           environment-name: xarray-tests
@@ -104,7 +104,7 @@ jobs:
         run: |
           echo "TODAY=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
       - name: Setup micromamba
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v2
         with:
           environment-file: ${{env.CONDA_ENV_FILE}}
           environment-name: xarray-tests
@@ -130,7 +130,7 @@ jobs:
           python -m mypy --install-types --non-interactive --cobertura-xml-report mypy_report xarray/
 
       - name: Upload mypy coverage to Codecov
-        uses: codecov/codecov-action@v4.5.0
+        uses: codecov/codecov-action@v5.1.2
         with:
           file: mypy_report/cobertura.xml
           flags: mypy
@@ -158,7 +158,7 @@ jobs:
         run: |
           echo "TODAY=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
       - name: Setup micromamba
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v2
         with:
           environment-file: ${{env.CONDA_ENV_FILE}}
           environment-name: xarray-tests
@@ -184,7 +184,7 @@ jobs:
           python -m mypy --install-types --non-interactive --cobertura-xml-report mypy_report xarray/
 
       - name: Upload mypy coverage to Codecov
-        uses: codecov/codecov-action@v4.5.0
+        uses: codecov/codecov-action@v5.1.2
         with:
           file: mypy_report/cobertura.xml
           flags: mypy39
@@ -219,7 +219,7 @@ jobs:
         run: |
           echo "TODAY=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
       - name: Setup micromamba
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v2
         with:
           environment-file: ${{env.CONDA_ENV_FILE}}
           environment-name: xarray-tests
@@ -245,7 +245,7 @@ jobs:
           python -m pyright xarray/
 
       - name: Upload pyright coverage to Codecov
-        uses: codecov/codecov-action@v4.5.0
+        uses: codecov/codecov-action@v5.1.2
         with:
           file: pyright_report/cobertura.xml
           flags: pyright
@@ -278,7 +278,7 @@ jobs:
         run: |
           echo "TODAY=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
       - name: Setup micromamba
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v2
         with:
           environment-file: ${{env.CONDA_ENV_FILE}}
           environment-name: xarray-tests
@@ -304,7 +304,7 @@ jobs:
           python -m pyright xarray/
 
       - name: Upload pyright coverage to Codecov
-        uses: codecov/codecov-action@v4.5.0
+        uses: codecov/codecov-action@v5.1.2
         with:
           file: pyright_report/cobertura.xml
           flags: pyright39
@@ -329,7 +329,7 @@ jobs:
           fetch-depth: 0 # Fetch all history for all branches and tags.
 
       - name: Setup micromamba
-        uses: mamba-org/setup-micromamba@v1
+        uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: xarray-tests
           create-args: >-
